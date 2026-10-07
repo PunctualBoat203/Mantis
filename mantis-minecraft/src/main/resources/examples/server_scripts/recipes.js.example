@@ -1,0 +1,14 @@
+import { events } from 'mantis:events';
+import { recipes } from 'minecraft:recipes';
+
+events.on('recipes', () => {
+  recipes.custom('mantis:stick_from_planks', {
+    type: 'minecraft:crafting_shapeless',
+    ingredients: [{ tag: 'minecraft:planks' }],
+    result: { item: 'minecraft:stick', count: 2 }
+  });
+
+  // The same operations accept any installed recipe serializer's JSON.
+  // Use an existing recipe's complete JSON with recipes.replace(id, json),
+  // or change an exact field with recipes.set({ id: 'modid:recipe' }, '/field', value).
+});

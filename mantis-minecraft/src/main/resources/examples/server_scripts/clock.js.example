@@ -1,0 +1,10 @@
+import { clock } from 'mantis:clock';
+import { console } from 'mantis:console';
+import { events } from 'mantis:events';
+
+const heartbeat = clock.every(1200, () => console.log('Mantis ticks: ' + clock.ticks()));
+
+events.on('player.logged_in', event => {
+  const key = 'welcome:' + event.player.uuid();
+  if (clock.cooldown(key, 1200)) event.player.tell('Welcome back!');
+});

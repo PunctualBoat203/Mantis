@@ -1,0 +1,61 @@
+buildscript {
+    repositories {
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public' }
+        mavenCentral()
+    }
+    dependencies { classpath 'org.spongepowered:mixingradle:0.7-SNAPSHOT' }
+}
+
+plugins { id 'net.minecraftforge.gradle' version '[6.0,6.2)' }
+apply plugin: 'org.spongepowered.mixin'
+
+base.archivesName = 'mantis'
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${buildDir}/createSrgToMcp/output.srg"
+            mods { mantis { source sourceSets.main } }
+        }
+        client {}
+        server { args '--nogui' }
+    }
+}
+
+mixin {
+    add sourceSets.main, 'mantis.refmap.json'
+    config 'mantis.mixins.json'
+}
+
+jarJar.enable()
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    implementation project(':mantis-runtime')
+    implementation project(':mantis-recipes')
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    ['org.graalvm.sdk:graal-sdk', 'org.graalvm.js:js', 'org.graalvm.regex:regex', 'org.graalvm.truffle:truffle-api'].each { artifact ->
+        jarJar("${artifact}:[${graal_version},23.0.13)") { jarJar.pin(it, graal_version) }
+    }
+    jarJar('com.ibm.icu:icu4j:[72.1,73)') { jarJar.pin(it, '72.1') }
+}
+
+def includedModules = [project(':mantis-core'), project(':mantis-runtime'), project(':mantis-recipes')]
+tasks.named('processResources').configure {
+    inputs.property 'version', project.version
+    filesMatching('META-INF/mods.toml') { expand version: project.version }
+}
+tasks.withType(Jar).configureEach {
+    manifest.attributes('MixinConfigs': 'mantis.mixins.json', 'Implementation-Version': project.version)
+}
+['jar', 'jarJar'].each { taskName ->
+    tasks.named(taskName).configure { includedModules.each { module -> from(module.sourceSets.main.output) } }
+}
+tasks.named('sourcesJar').configure { includedModules.each { module -> from(module.sourceSets.main.allSource) } }
+reobf { jarJar {} }
+tasks.named('jar').configure { archiveClassifier = 'slim'; finalizedBy 'reobfJar' }
+tasks.named('jarJar').configure { archiveClassifier = ''; finalizedBy 'reobfJarJar' }
+tasks.named('build').configure { dependsOn 'jarJar' }

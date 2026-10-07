@@ -1,0 +1,4 @@
+dependencies {
+    api "org.graalvm.sdk:graal-sdk:${graal_version}"
+    runtimeOnly "org.graalvm.js:js:${graal_version}"
+}

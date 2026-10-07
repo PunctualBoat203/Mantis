@@ -1,0 +1,4 @@
+import { console } from 'mantis:console';
+import { events } from 'mantis:events';
+
+events.once('startup', () => console.log('Mantis startup scripts loaded.'));
