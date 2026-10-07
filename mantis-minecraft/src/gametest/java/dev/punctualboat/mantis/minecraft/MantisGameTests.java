@@ -83,6 +83,15 @@ public final class MantisGameTests {
             helper.assertTrue(recipe.isPresent(), "Scripted recipe must load through RecipeManager");
             var result = recipe.orElseThrow().getResultItem(server.registryAccess());
             helper.assertTrue(result.is(Items.STICK) && result.getCount() == 4, "Nested recipe patch must reach the installed serializer");
+            var custom = server.getRecipeManager().byKey(new ResourceLocation("mantis:infusion")).orElseThrow();
+            helper.assertTrue(custom instanceof InfusionTestRecipe.Infusion, "Non-crafting recipe must retain its registered serializer and type");
+            var infusion = (InfusionTestRecipe.Infusion) custom;
+            helper.assertTrue(infusion.energy() == 32000, "Generic patches must change nested machine/fusion energy");
+            helper.assertTrue(infusion.getResultItem(server.registryAccess()).is(Items.DIAMOND) && infusion.getResultItem(server.registryAccess()).getCount() == 2,
+                    "Generic array paths must change a custom output schema");
+            helper.assertTrue(infusion.json().getAsJsonObject("ritual").get("duration").getAsInt() == 400
+                    && infusion.json().getAsJsonObject("ritual").getAsJsonObject("extra").get("preserved").getAsBoolean(),
+                    "Generic patching must change ritual fields and preserve opaque metadata through reloads");
         }
 
         private void write(String text) {

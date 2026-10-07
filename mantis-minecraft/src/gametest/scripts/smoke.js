@@ -21,6 +21,12 @@ clock.every(1, () => {});
 events.once('server.started', () => clock.cooldown('mantis:smoke', 1000000));
 
 events.on('recipes', () => {
+  recipes.set({ type: 'mantis:test_infusion' }, '/fusion/energy', 32000);
+  recipes.set({ id: 'mantis:infusion' }, '/outputs/0/count', 2);
+  recipes.patch({ type: 'mantis:test_infusion' }, json => {
+    json.ritual.duration = 400;
+    return json;
+  });
   recipes.custom('mantis:smoke', {
     type: 'minecraft:crafting_shapeless',
     ingredients: [{ item: 'minecraft:stone' }],
