@@ -43,6 +43,9 @@ public final class MantisGameTests {
             if (stage == 0) {
                 verifyRecipe();
                 helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 1, "Expected one active script timer");
+                helper.assertTrue(ClockData.get(server).clock().remaining("mantis:async") > 0, "Async values must convert and resume on the server thread");
+                helper.assertTrue(ClockData.get(server).clock().remaining("mantis:lifecycle") > 0, "Lifecycle start hook must run after clock attachment");
+                helper.assertTrue(MantisTestExtension.activeFutures() == 1, "Expected one owned pending future");
                 write(original + "\nevents.on('recipes', () => recipes.custom('mantis:bad', { type: 'mantis:missing_serializer' }));\n");
                 reload = server.reloadResources(server.getPackRepository().getSelectedIds());
                 stage = 1;
@@ -53,6 +56,7 @@ public final class MantisGameTests {
                 helper.assertTrue(reload.isCompletedExceptionally(), "An invalid scripted recipe must reject reload");
                 verifyRecipe();
                 helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 1, "Failed reload must keep the previous timer");
+                helper.assertTrue(MantisTestExtension.activeFutures() == 1, "Failed reload must cancel the candidate future and retain the old one");
                 write(original);
                 reload = server.reloadResources(server.getPackRepository().getSelectedIds());
                 stage = 2;
@@ -66,6 +70,7 @@ public final class MantisGameTests {
                 helper.assertTrue(clock.ticks() > initialTick, "Internal clock must keep advancing through reloads");
                 helper.assertTrue(clock.scheduledTasks() == 1, "Successful reload must replace the old timer");
                 helper.assertTrue(clock.remaining("mantis:smoke") > 0, "Reload must preserve named cooldowns");
+                helper.assertTrue(MantisTestExtension.activeFutures() == 1 && MantisTestExtension.cancelledFutures() >= 2, "Successful reload must cancel old async work and replace it once");
                 CompoundTag saved = ClockData.get(server).save(new CompoundTag());
                 helper.assertTrue(saved.getLong("ticks") == clock.ticks(), "World data must save the internal counter");
                 helper.assertTrue(saved.getCompound("cooldowns").getLong("mantis:smoke") > clock.ticks(), "World data must save cooldown deadlines");

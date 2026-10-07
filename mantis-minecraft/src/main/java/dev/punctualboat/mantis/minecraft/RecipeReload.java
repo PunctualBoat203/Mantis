@@ -26,6 +26,7 @@ public final class RecipeReload {
                 registrar.module("minecraft:recipes", Map.of("recipes", recipes[0]));
                 registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
                 registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
+                MinecraftBindings.register(registrar);
                 MantisApi.registerModules(registrar);
             });
         } catch (IOException error) { throw new IllegalStateException("Could not read server scripts", error); }

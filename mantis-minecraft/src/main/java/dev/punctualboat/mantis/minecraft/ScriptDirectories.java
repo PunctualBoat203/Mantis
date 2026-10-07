@@ -14,7 +14,7 @@ public final class ScriptDirectories {
     public static void create() throws IOException {
         Files.createDirectories(STARTUP);
         Files.createDirectories(SERVER);
-        for (String name : new String[]{"startup_scripts/startup.js.example", "server_scripts/clock.js.example", "server_scripts/recipes.js.example"}) {
+        for (String name : new String[]{"startup_scripts/startup.js.example", "server_scripts/clock.js.example", "server_scripts/recipes.js.example", "server_scripts/lifecycle.js.example"}) {
             Path target = ROOT.resolve("examples").resolve(name);
             Files.createDirectories(target.getParent());
             if (Files.exists(target)) continue;

@@ -2,6 +2,7 @@ package dev.punctualboat.mantis.minecraft;
 
 import com.mojang.logging.LogUtils;
 import dev.punctualboat.mantis.core.MantisEngine;
+import dev.punctualboat.mantis.core.ScriptException;
 import dev.punctualboat.mantis.minecraft.api.MantisApi;
 import dev.punctualboat.mantis.runtime.*;
 import net.minecraft.commands.Commands;
@@ -16,6 +17,7 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.graalvm.polyglot.proxy.ProxyObject;
@@ -58,9 +60,10 @@ public final class Mantis {
                 startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
                         Mantis::log, Mantis::report, registrar -> {
                     registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
+                    MinecraftBindings.register(registrar);
                     MantisApi.registerModules(registrar);
                 }, false);
-                startup.events().emitStrict("startup", ProxyObject.fromMap(Map.of("version", "0.1.0")));
+                startup.events().emitStrict("startup", ProxyObject.fromMap(Map.of("version", ModList.get().getModContainerById("mantis").orElseThrow().getModInfo().getVersion().toString())));
             } catch (IOException | RuntimeException error) {
                 if (startup != null) { startup.close(); startup = null; }
                 throw new IllegalStateException("Mantis startup scripts failed", error);
@@ -73,7 +76,7 @@ public final class Mantis {
         return instance.engine;
     }
     public static void log(String text) { LOG.info("[Mantis] {}", text); }
-    public static void report(Throwable error) { LOG.error("[Mantis] {}", error.getMessage()); LOG.debug("Mantis script failure", error); }
+    public static void report(Throwable error) { LOG.error("[Mantis] {}", error instanceof ScriptException script ? script.format() : error.getMessage()); LOG.debug("Mantis script failure", error); }
     public static void pending(PreparedScripts scripts) { PENDING.add(scripts); }
     public static void discardPending() {
         for (PreparedScripts scripts : Set.copyOf(PENDING)) {
@@ -103,8 +106,11 @@ public final class Mantis {
         instance.active = next;
         PENDING.remove(next);
         if (previous != null) {
-            try { previous.close(); } catch (RuntimeException error) { report(error); }
+            try { previous.session().close("reload"); } catch (RuntimeException error) { report(error); }
         }
+        ScriptScheduler scheduler = ScriptScheduler.of(server::execute, server::isSameThread);
+        next.session().start(scheduler, reload);
+        if (instance.startup != null) instance.startup.start(scheduler, false);
         instance.emit(reload ? "server.reloaded" : "server.started", Map.of("ticks", instance.clock.ticks()));
         log("Loaded " + next.session().scriptCount() + " server scripts");
     }
@@ -112,6 +118,7 @@ public final class Mantis {
     private void stopping(ServerStoppingEvent event) {
         emit("server.stopping", Map.of());
         if (active != null) { active.close(); active = null; }
+        if (startup != null) startup.async().suspend();
         discardPending();
         if (clockData != null) { clockData.stop(); clockData = null; clock = null; }
     }
@@ -119,6 +126,8 @@ public final class Mantis {
     private void tick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || active == null || clock == null) return;
         clock.tick();
+        active.session().async().drain();
+        if (startup != null) startup.async().drain();
         emit("server.tick", Map.of("ticks", clock.ticks()));
     }
 
@@ -142,10 +151,30 @@ public final class Mantis {
                 }))
                 .then(Commands.literal("status").executes(command -> {
                     ScriptSession scripts = active.session();
-                    String text = "Mantis: " + scripts.scriptCount() + " scripts, " + scripts.events().listenerCount()
-                            + " listeners, " + clock.scheduledTasks() + " timers, " + scripts.context().invocations() + " calls, "
+                    String text = "Mantis " + scripts.state().name().toLowerCase() + ": " + scripts.scriptCount() + " scripts, " + scripts.events().listenerCount()
+                            + " listeners, " + clock.scheduledTasks() + " timers, " + scripts.async().pendingCount() + " async, " + scripts.context().invocations() + " calls, "
                             + scripts.context().executionNanos() / 1_000_000 + " ms script time";
                     command.getSource().sendSuccess(() -> Component.literal(text), false);
+                    return 1;
+                }))
+                .then(Commands.literal("scripts").executes(command -> {
+                    command.getSource().sendSuccess(() -> Component.literal(String.join(", ", active.session().scriptNames())), false); return 1;
+                }))
+                .then(Commands.literal("modules").executes(command -> {
+                    command.getSource().sendSuccess(() -> Component.literal(String.join(", ", active.session().moduleNames())), false); return 1;
+                }))
+                .then(Commands.literal("errors").executes(command -> {
+                    var errors = active.session().recentErrors();
+                    if (errors.isEmpty()) command.getSource().sendSuccess(() -> Component.literal("No script errors in this generation"), false);
+                    else errors.stream().skip(Math.max(0, errors.size() - 5)).forEach(error -> command.getSource().sendFailure(Component.literal(error)));
+                    return 1;
+                }))
+                .then(Commands.literal("profile").executes(command -> {
+                    active.session().context().diagnostics().snapshot().stream().limit(8).forEach(sample -> command.getSource().sendSuccess(() ->
+                            Component.literal(sample.operation() + ": " + sample.calls() + " calls, " + sample.totalNanos() / 1_000_000 + " ms total, "
+                                    + sample.maxNanos() / 1_000_000 + " ms max, " + sample.failures() + " failures"), false));
+                    var cache = engine.cacheStats();
+                    command.getSource().sendSuccess(() -> Component.literal("Source cache: " + cache.hits() + " hits, " + cache.misses() + " misses, " + cache.entries() + " entries"), false);
                     return 1;
                 }))
                 .then(Commands.literal("reload").executes(command -> {

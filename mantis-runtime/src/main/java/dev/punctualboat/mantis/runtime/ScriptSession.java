@@ -1,6 +1,7 @@
 package dev.punctualboat.mantis.runtime;
 
 import dev.punctualboat.mantis.core.*;
+import dev.punctualboat.mantis.interop.*;
 import org.graalvm.polyglot.Value;
 
 import java.util.*;
@@ -14,11 +15,15 @@ public final class ScriptSession implements AutoCloseable {
 
     public final class Registrar {
         public void module(String name, Map<String, Object> exports) {
-            if (modules.putIfAbsent(name, Map.copyOf(exports)) != null) throw new IllegalArgumentException("Duplicate module: " + name);
+            if (modules.putIfAbsent(name, Collections.unmodifiableMap(new LinkedHashMap<>(exports))) != null) throw new IllegalArgumentException("Duplicate module: " + name);
         }
         public Supplier<MantisContext> context() { return () -> Objects.requireNonNull(context, "Script context is not ready"); }
         public ResourceScope resources() { return resources; }
         public EventBus events() { return events; }
+        public TypeConversions conversions() { return conversions; }
+        public HostBindings bindings() { return bindings; }
+        public AsyncBridge async() { return async; }
+        public Object bind(Object object) { return bindings.bind(object); }
     }
 
     private final ResourceScope resources = new ResourceScope();
@@ -26,8 +31,17 @@ public final class ScriptSession implements AutoCloseable {
     private final EventBus events;
     private final MantisEngine engine;
     private final int scriptCount;
+    private final List<String> scriptNames;
     private final ClockApi clockApi = new ClockApi();
     private MantisContext context;
+    private final TypeConversions conversions = new TypeConversions(() -> Objects.requireNonNull(context, "Script context is not ready"));
+    private final AsyncBridge async;
+    private final HostBindings bindings;
+    private final Consumer<Throwable> errors;
+    private final List<SessionState> history = new ArrayList<>(List.of(SessionState.CREATED));
+    private SessionState state = SessionState.CREATED;
+    private Throwable failure;
+    private final Deque<String> recentErrors = new ArrayDeque<>();
 
     public ScriptSession(MantisEngine engine, Map<String, String> sources, TickClock clock,
                          Consumer<String> log, Consumer<Throwable> errors, Modules extension) {
@@ -37,18 +51,32 @@ public final class ScriptSession implements AutoCloseable {
     public ScriptSession(MantisEngine engine, Map<String, String> sources, TickClock clock,
                          Consumer<String> log, Consumer<Throwable> errors, Modules extension, boolean clockModule) {
         this.engine = engine;
-        this.events = new EventBus(errors);
+        this.errors = Objects.requireNonNull(errors);
+        this.events = new EventBus(this::report);
+        this.async = new AsyncBridge(() -> context, conversions, resources, this::report);
+        this.bindings = new HostBindings(conversions, async::canInvoke);
         this.scriptCount = sources.size();
+        this.scriptNames = sources.keySet().stream().sorted().toList();
         Registrar registrar = new Registrar();
         registrar.module("mantis:events", Map.of("events", new EventsApi()));
         registrar.module("mantis:console", Map.of("console", new ConsoleApi(log)));
+        registrar.module("mantis:lifecycle", Map.of("lifecycle", new LifecycleApi()));
         if (clockModule) registrar.module("mantis:clock", Map.of("clock", clockApi));
         try {
+            transition(SessionState.LOADING);
             extension.register(registrar);
-            context = engine.createContext(sources, modules);
+            conversions.freeze();
+            context = engine.createContext(sources, modules, (ready, value) -> { context = ready; return bindings.export(value); });
             for (String name : new TreeSet<>(sources.keySet())) context.evaluateModule(name);
+            transition(SessionState.LOADED);
+            lifecycle("load", Map.of());
+            lifecycle("init", Map.of());
             if (clock != null) attachClock(clock);
+            if (clock != null) start(ScriptScheduler.pumped(), false);
         } catch (RuntimeException error) {
+            failure = error;
+            transition(SessionState.FAILED);
+            if (context != null && !context.isClosed()) events.emit("lifecycle.error", MantisContext.readOnly(Map.of("message", error.getMessage() == null ? error.toString() : error.getMessage())));
             try { close(); } catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
             throw error;
         }
@@ -57,15 +85,56 @@ public final class ScriptSession implements AutoCloseable {
     public MantisContext context() { return context; }
     public EventBus events() { return events; }
     public int scriptCount() { return scriptCount; }
+    public List<String> scriptNames() { return scriptNames; }
+    public List<String> moduleNames() { return modules.keySet().stream().sorted().toList(); }
+    public List<String> recentErrors() { return List.copyOf(recentErrors); }
     public void attachClock(TickClock clock) { clockApi.attach(clock); }
     public int ownedResources() { return resources.size(); }
+    public SessionState state() { return state; }
+    public List<SessionState> history() { return List.copyOf(history); }
+    public Throwable failure() { return failure; }
+    public AsyncBridge async() { return async; }
+    public TypeConversions conversions() { return conversions; }
+    public HostBindings bindings() { return bindings; }
+
+    public void start(ScriptScheduler scheduler, boolean reload) {
+        if (state != SessionState.LOADED && state != SessionState.RUNNING) throw new IllegalStateException("Cannot start scripts in state " + state);
+        if (state == SessionState.RUNNING) { async.activate(scheduler); return; }
+        transition(SessionState.RUNNING);
+        events.emit("lifecycle.start", MantisContext.readOnly(Map.of("reloaded", reload)));
+        if (reload) events.emit("lifecycle.reload", MantisContext.readOnly(Map.of()));
+        async.activate(scheduler);
+    }
+
+    public final class LifecycleApi {
+        @MantisExport public String state() { return ScriptSession.this.state.name().toLowerCase(Locale.ROOT); }
+        @MantisExport public EventBus.Subscription on(String hook, Value callback) {
+            if (!Set.of("load", "init", "start", "reload", "stop", "unload", "error").contains(hook)) throw new IllegalArgumentException("Unknown lifecycle hook: " + hook);
+            return new EventsApi().subscribe("lifecycle." + hook, callback, false);
+        }
+    }
+
+    private void transition(SessionState next) { state = next; history.add(next); }
+    private void lifecycle(String hook, Map<String, Object> data) { events.emitStrict("lifecycle." + hook, MantisContext.readOnly(data)); }
+    private boolean reporting;
+    private void report(Throwable error) {
+        if (recentErrors.size() == 32) recentErrors.removeFirst();
+        recentErrors.addLast(error instanceof ScriptException script ? script.format() : error.toString());
+        if (context != null && context.isClosed() && state == SessionState.RUNNING) { failure = error; transition(SessionState.FAILED); }
+        if (!reporting && context != null && !context.isClosed() && state != SessionState.DISPOSED) {
+            reporting = true;
+            try { events.emit("lifecycle.error", MantisContext.readOnly(Map.of("message", error.getMessage() == null ? error.toString() : error.getMessage()))); }
+            finally { reporting = false; }
+        }
+        errors.accept(error);
+    }
 
     public final class EventsApi {
         @MantisExport public EventBus.Subscription on(String name, Value callback) { return subscribe(name, callback, false); }
         @MantisExport public EventBus.Subscription once(String name, Value callback) { return subscribe(name, callback, true); }
         private EventBus.Subscription subscribe(String name, Value callback, boolean once) {
             if (!callback.canExecute()) throw new IllegalArgumentException("Event callback must be a function");
-            EventBus.Subscription subscription = events.subscribe(name, event -> context.invoke(callback, event), once);
+            EventBus.Subscription subscription = events.subscribe(name, event -> context.invoke(callback, bindings.export(event)), once);
             subscription.whenClosed(() -> resources.forget(subscription));
             return resources.own(subscription);
         }
@@ -137,8 +206,24 @@ public final class ScriptSession implements AutoCloseable {
         @MantisExport public void error(String message) { log.accept("ERROR: " + message); }
     }
 
-    @Override public void close() {
-        try { resources.close(); }
-        finally { if (context != null) { engine.release(context); context = null; } }
+    @Override public void close() { close("stop"); }
+    public void close(String reason) {
+        if (state == SessionState.DISPOSED || state == SessionState.STOPPING) return;
+        boolean failed = state == SessionState.FAILED;
+        transition(SessionState.STOPPING);
+        try {
+            if (context != null && !context.isClosed()) {
+                if (!failed) events.emit("lifecycle.stop", MantisContext.readOnly(Map.of("reason", reason)));
+                events.emit("lifecycle.unload", MantisContext.readOnly(Map.of("reason", reason)));
+            }
+        } finally {
+            async.close();
+            try { resources.close(); }
+            finally {
+                bindings.close();
+                try { if (context != null) engine.release(context); }
+                finally { context = null; transition(SessionState.DISPOSED); }
+            }
+        }
     }
 }

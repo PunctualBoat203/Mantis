@@ -1,0 +1,6 @@
+import { lifecycle } from 'mantis:lifecycle';
+import { console } from 'mantis:console';
+
+lifecycle.on('start', event => console.log(event.reloaded ? 'Scripts reloaded' : 'Scripts started'));
+lifecycle.on('stop', event => console.log('Scripts stopping: ' + event.reason));
+lifecycle.on('error', event => console.error(event.message));

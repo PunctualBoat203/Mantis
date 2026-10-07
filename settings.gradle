@@ -7,4 +7,4 @@ pluginManagement {
 }
 
 rootProject.name = 'Mantis'
-include 'mantis-core', 'mantis-runtime', 'mantis-recipes', 'mantis-minecraft'
+include 'mantis-core', 'mantis-interop', 'mantis-runtime', 'mantis-recipes', 'mantis-rhino-compat', 'mantis-benchmarks', 'mantis-minecraft'

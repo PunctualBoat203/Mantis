@@ -1,0 +1,40 @@
+name: Comparative benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      rhino_version:
+        description: Upstream Rhino baseline
+        required: true
+        default: '1.9.1'
+        type: choice
+        options: ['1.9.1', '1.7.15.1']
+      cases:
+        description: JMH benchmark name pattern
+        required: true
+        default: '.*'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run comparative JMH measurements
+        env:
+          RHINO_VERSION: ${{ inputs.rhino_version }}
+          BENCHMARK_CASES: ${{ inputs.cases }}
+        run: ./gradlew :mantis-benchmarks:benchmark -PrhinoVersion="$RHINO_VERSION" -PbenchmarkArgs="$BENCHMARK_CASES -prof gc" --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mantis-rhino-benchmarks
+          path: mantis-benchmarks/build/results/benchmarks.json

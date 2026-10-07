@@ -29,8 +29,10 @@ minecraft {
                 mantis {
                     source sourceSets.main
                     source project(':mantis-core').sourceSets.main
+                    source project(':mantis-interop').sourceSets.main
                     source project(':mantis-runtime').sourceSets.main
                     source project(':mantis-recipes').sourceSets.main
+                    source project(':mantis-rhino-compat').sourceSets.main
                 }
             }
         }
@@ -54,6 +56,7 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     implementation project(':mantis-runtime')
     implementation project(':mantis-recipes')
+    implementation project(':mantis-rhino-compat')
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     ['org.graalvm.sdk:graal-sdk', 'org.graalvm.js:js', 'org.graalvm.regex:regex', 'org.graalvm.truffle:truffle-api'].each { artifact ->
         minecraftLibrary "${artifact}:${graal_version}"
@@ -63,7 +66,7 @@ dependencies {
     jarJar('com.ibm.icu:icu4j:[72.1,73)') { jarJar.pin(it, '72.1') }
 }
 
-def includedModules = [project(':mantis-core'), project(':mantis-runtime'), project(':mantis-recipes')]
+def includedModules = [project(':mantis-core'), project(':mantis-interop'), project(':mantis-runtime'), project(':mantis-recipes'), project(':mantis-rhino-compat')]
 tasks.named('processResources').configure {
     inputs.property 'version', project.version
     filesMatching('META-INF/mods.toml') { expand version: project.version }

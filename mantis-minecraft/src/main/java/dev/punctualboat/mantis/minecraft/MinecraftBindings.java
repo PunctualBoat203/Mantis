@@ -1,14 +1,32 @@
 package dev.punctualboat.mantis.minecraft;
 
 import dev.punctualboat.mantis.core.MantisExport;
+import dev.punctualboat.mantis.compat.RhinoCompatibility;
+import dev.punctualboat.mantis.runtime.ScriptSession;
+import dev.punctualboat.mantis.minecraft.api.MantisApi;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.server.ServerLifecycleHooks;
+import java.util.Map;
 
 public final class MinecraftBindings {
     private MinecraftBindings() {}
+    public static void register(ScriptSession.Registrar registrar) {
+        registrar.conversions().register(ResourceLocation.class, ResourceLocation::toString, value -> new ResourceLocation(value.asString()));
+        registrar.conversions().register(Component.class, component -> Map.of("text", component.getString(), "json", Component.Serializer.toJson(component)), value -> {
+            if (value.isString()) return Component.literal(value.asString());
+            if (value.hasMember("json")) {
+                Component parsed = Component.Serializer.fromJson(value.getMember("json").asString());
+                if (parsed != null) return parsed;
+            }
+            if (value.hasMember("text")) return Component.literal(value.getMember("text").asString());
+            throw new IllegalArgumentException("Component requires a string, text, or JSON");
+        });
+        RhinoCompatibility.register(registrar, MantisApi.rhinoTypes());
+    }
     public static final class Mods {
         @MantisExport public boolean isLoaded(String id) { return ModList.get().isLoaded(id); }
     }
