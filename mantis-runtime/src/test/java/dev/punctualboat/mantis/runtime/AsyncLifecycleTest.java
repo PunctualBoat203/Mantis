@@ -12,6 +12,9 @@ class AsyncLifecycleTest {
         private final CompletableFuture<List<Integer>> value = new CompletableFuture<>();
         @MantisExport public CompletableFuture<List<Integer>> load() { return value; }
     }
+    public static final class CallbackHost {
+        @MantisExport public int apply(java.util.function.Function<Integer,Integer> callback) { return callback.apply(21); }
+    }
 
     @Test void futuresBecomeAwaitableNativePromisesAndDeliverOnOwnerAfterActivation() throws Exception {
         Host host = new Host(); List<String> calls = new ArrayList<>();
@@ -139,6 +142,32 @@ class AsyncLifecycleTest {
             Thread worker = new Thread(() -> source.complete("ready")); worker.start(); worker.join();
             assertTrue(reported.isEmpty()); assertFalse(result.isDone());
             session.async().drain(); assertEquals(List.of(owner), reported); assertEquals("ready", result.join());
+        }
+    }
+
+    @Test void aPreparedContextTransfersToTheHostThreadBeforeStartCallbacks() {
+        List<String> calls = new ArrayList<>();
+        try (MantisEngine engine = new MantisEngine()) {
+            ScriptSession session = CompletableFuture.supplyAsync(() -> new ScriptSession(engine, Map.of("main.js", """
+                    import {lifecycle} from 'mantis:lifecycle'; import {console} from 'mantis:console'; import {host} from 'test:api';
+                    lifecycle.on('start', () => console.log('answer:' + host.apply(x => x*2)));
+                    """), null, calls::add, error -> fail(error), registrar -> registrar.module("test:api", Map.of("host", new CallbackHost())))).join();
+            try (session) { session.start(ScriptScheduler.pumped(), false); assertEquals(List.of("answer:42"), calls); }
+        }
+    }
+
+    @Test void aHostCancellationFailureDoesNotPreventOtherCleanup() {
+        CompletableFuture<String> bad = new CompletableFuture<>() {
+            @Override public boolean cancel(boolean interrupt) { throw new IllegalStateException("host cancellation failed"); }
+        };
+        CompletableFuture<String> good = new CompletableFuture<>();
+        try (MantisEngine engine = new MantisEngine(); TickClock clock = new TickClock()) {
+            ScriptSession session = new ScriptSession(engine, Map.of("main.js", "import {clock} from 'mantis:clock'; clock.every(1,()=>{});"), clock,
+                    message -> {}, error -> {}, registrar -> {});
+            session.async().promise(bad); session.async().promise(good);
+            assertThrows(RuntimeException.class, session::close);
+            assertTrue(good.isCancelled()); assertEquals(0, session.ownedResources()); assertEquals(0, clock.scheduledTasks());
+            assertEquals(SessionState.DISPOSED, session.state()); assertNull(session.context());
         }
     }
 }

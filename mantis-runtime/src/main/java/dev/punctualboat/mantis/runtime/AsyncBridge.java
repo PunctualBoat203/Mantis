@@ -44,9 +44,13 @@ public final class AsyncBridge implements AutoCloseable {
     }
 
     public void activate(ScriptScheduler scheduler) {
+        activate(scheduler, () -> {});
+    }
+    public void activate(ScriptScheduler scheduler, Runnable beforeDelivery) {
         if (closed) throw new IllegalStateException("Async bridge is closed");
         if (!scheduler.isOnThread()) throw new IllegalStateException("Activate on the host scheduler thread");
         this.scheduler = Objects.requireNonNull(scheduler);
+        beforeDelivery.run();
         requestDrain();
     }
 
@@ -194,9 +198,17 @@ public final class AsyncBridge implements AutoCloseable {
 
     public void suspend() {
         scheduler = null; scheduled.set(false);
-        for (Pending task : List.copyOf(pending)) task.close();
+        RuntimeException failure = null;
+        for (Pending task : List.copyOf(pending)) {
+            try { task.close(); }
+            catch (RuntimeException error) {
+                if (failure == null) failure = new RuntimeException("Async cancellation failed");
+                failure.addSuppressed(error);
+            }
+        }
         deliveries.clear();
         schedulingFailures.clear();
+        if (failure != null) throw failure;
     }
     @Override public void close() { closed = true; suspend(); }
 }

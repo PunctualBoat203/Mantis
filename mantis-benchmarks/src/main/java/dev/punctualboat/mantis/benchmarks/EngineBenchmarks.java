@@ -147,17 +147,17 @@ public class EngineBenchmarks {
     }
     @Benchmark public int parseAndEvaluate(Warm state) { int value = ++state.sequence; return state.runtime.evaluate("parse.js", value + "+1"); }
     @Benchmark public int cachedEvaluate(Warm state) { return state.runtime.cachedEvaluate(); }
-    @Benchmark public int functionCall(Warm state) { return state.runtime.call("simple", 21); }
-    @Benchmark public int hotLoop(Warm state) { return state.runtime.call("loop", 21); }
-    @Benchmark public int javaMethod(Warm state) { return state.runtime.call("method", 21); }
-    @Benchmark public int staticMethod(Warm state) { return state.runtime.call("staticMethod", 21); }
-    @Benchmark public int fieldRead(Warm state) { return state.runtime.call("field", 21); }
-    @Benchmark public int propertyRead(Warm state) { return state.runtime.call("property", 21); }
-    @Benchmark public int constructor(Warm state) { return state.runtime.call("construct", 21); }
-    @Benchmark public int overloadedMethod(Warm state) { return state.runtime.call("overload", 21); }
+    @Benchmark public int functionCall(Warm state) { return state.runtime.call("simple", state.sequence++ & 255); }
+    @Benchmark public int hotLoop(Warm state) { return state.runtime.call("loop", state.sequence++ & 255); }
+    @Benchmark public int javaMethod(Warm state) { return state.runtime.call("method", state.sequence++ & 255); }
+    @Benchmark public int staticMethod(Warm state) { return state.runtime.call("staticMethod", state.sequence++ & 255); }
+    @Benchmark public int fieldRead(Warm state) { return state.runtime.call("field", state.sequence++ & 255); }
+    @Benchmark public int propertyRead(Warm state) { return state.runtime.call("property", state.sequence++ & 255); }
+    @Benchmark public int constructor(Warm state) { return state.runtime.call("construct", state.sequence++ & 255); }
+    @Benchmark public int overloadedMethod(Warm state) { return state.runtime.call("overload", state.sequence++ & 255); }
     @Benchmark public int arrayConversion(Warm state) { return state.runtime.call("array", state.runtime.array(state.array)); }
     @Benchmark public int mapConversion(Warm state) { return state.runtime.call("map", state.runtime.object(state.map)); }
     @Benchmark public int recipeEdits(Warm state) { return state.runtime.call("recipes", 256); }
-    @Benchmark public int eventDispatch(Warm state) { state.events.emit("tick", 21); return state.events.listenerCount(); }
+    @Benchmark public int eventDispatch(Warm state) { state.events.emit("tick", state.sequence++ & 255); return state.events.listenerCount(); }
     @Benchmark public int load100Scripts(Warm state) { return state.runtime.loadCollection(100); }
 }

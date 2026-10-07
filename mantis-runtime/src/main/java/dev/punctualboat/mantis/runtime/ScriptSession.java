@@ -98,12 +98,14 @@ public final class ScriptSession implements AutoCloseable {
     public HostBindings bindings() { return bindings; }
 
     public void start(ScriptScheduler scheduler, boolean reload) {
+        if (!scheduler.isOnThread()) throw new IllegalStateException("Start scripts on the host scheduler thread");
         if (state != SessionState.LOADED && state != SessionState.RUNNING) throw new IllegalStateException("Cannot start scripts in state " + state);
         if (state == SessionState.RUNNING) { async.activate(scheduler); return; }
         transition(SessionState.RUNNING);
-        events.emit("lifecycle.start", MantisContext.readOnly(Map.of("reloaded", reload)));
-        if (reload) events.emit("lifecycle.reload", MantisContext.readOnly(Map.of()));
-        async.activate(scheduler);
+        async.activate(scheduler, () -> {
+            events.emit("lifecycle.start", MantisContext.readOnly(Map.of("reloaded", reload)));
+            if (reload) events.emit("lifecycle.reload", MantisContext.readOnly(Map.of()));
+        });
     }
 
     public final class LifecycleApi {
@@ -217,12 +219,14 @@ public final class ScriptSession implements AutoCloseable {
                 events.emit("lifecycle.unload", MantisContext.readOnly(Map.of("reason", reason)));
             }
         } finally {
-            async.close();
-            try { resources.close(); }
+            try { async.close(); }
             finally {
-                bindings.close();
-                try { if (context != null) engine.release(context); }
-                finally { context = null; transition(SessionState.DISPOSED); }
+                try { resources.close(); }
+                finally {
+                    bindings.close();
+                    try { if (context != null) engine.release(context); }
+                    finally { context = null; transition(SessionState.DISPOSED); }
+                }
             }
         }
     }
