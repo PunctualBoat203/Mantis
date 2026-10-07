@@ -62,8 +62,10 @@ public final class TypeConversions {
     public void freeze() { frozen = true; }
 
     public Value toScript(Object object) {
-        return context().access("convert:java-to-js", () -> context().value(encode(object, new IdentityHashMap<>(), 0)));
+        return context().access("convert:java-to-js", () -> context().value(encode(object, null, 0)));
     }
+
+    Object export(Object object) { return context().access("convert:java-to-js", () -> encode(object, null, 0)); }
 
     private Object encode(Object value, IdentityHashMap<Object, Boolean> path, int depth) {
         if (depth > 64) throw new IllegalArgumentException("Conversion exceeds 64 nested values");
@@ -82,6 +84,7 @@ public final class TypeConversions {
         if (value instanceof Enum<?> enumeration) return enumeration.name();
         boolean structured = value instanceof Collection<?> || value instanceof Map<?, ?> || value.getClass().isArray() || value.getClass().isRecord();
         if (!structured) return value;
+        if (path == null) path = new IdentityHashMap<>();
         if (path.put(value, true) != null) throw new IllegalArgumentException("Cyclic Java collection or record");
         try {
             if (value instanceof Collection<?> collection) {
@@ -119,7 +122,7 @@ public final class TypeConversions {
         return converted;
     }
     public Object fromScript(Value value, Type target) {
-        return context().access("convert:js-to-java", () -> decode(value, target, new HashSet<>(), 0));
+        return context().access("convert:js-to-java", () -> decode(value, target, null, 0));
     }
 
     private Object decode(Value value, Type target, Set<Value> path, int depth) {
@@ -160,6 +163,7 @@ public final class TypeConversions {
             if (value.isNumber()) return value.asDouble();
             if (value.isHostObject()) return value.asHostObject();
         }
+        if (path == null) path = new HashSet<>();
         if (!path.add(value)) throw new IllegalArgumentException("Cyclic JavaScript object");
         try {
             if ((raw.isArray() || raw == List.class || raw == Collection.class || raw == Set.class || raw == Object.class) && value.hasArrayElements()) {

@@ -6,8 +6,6 @@ import org.graalvm.polyglot.proxy.*;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.function.BiFunction;
 
@@ -17,7 +15,7 @@ public final class MantisContext implements AutoCloseable {
     private final Map<String, Value> evaluatedModules = new LinkedHashMap<>();
     private final Map<Value, String> functionLabels = new WeakHashMap<>();
     private final SourceCache sourceCache;
-    private final ScheduledExecutorService watchdog;
+    private final ExecutionWatchdog.Guard execution;
     private final Diagnostics diagnostics = new Diagnostics();
     private final Value helpers;
     private boolean closed;
@@ -26,11 +24,10 @@ public final class MantisContext implements AutoCloseable {
 
     public record ModuleStats(long hits, long misses, List<String> loaded) {}
 
-    MantisContext(Engine engine, ScheduledExecutorService watchdog, SourceCache sourceCache,
+    MantisContext(Engine engine, ExecutionWatchdog watchdog, SourceCache sourceCache,
                   Map<String, String> sources, Map<String, Map<String, Object>> modules,
                   BiFunction<MantisContext, Object, Object> exports) {
         this.sources = Map.copyOf(sources);
-        this.watchdog = watchdog;
         this.sourceCache = sourceCache;
         context = Context.newBuilder("js").engine(engine)
                 .allowExperimentalOptions(true)
@@ -43,7 +40,9 @@ public final class MantisContext implements AutoCloseable {
                 .option("js.java-package-globals", "false")
                 .resourceLimits(ResourceLimits.newBuilder().statementLimit(1_000_000, source -> true).build())
                 .build();
-        helpers = run("initialize", Duration.ofSeconds(10), () -> context.eval(sourceCache.get("mantis:values", """
+        execution = watchdog.register(() -> context.close(true));
+        try {
+            helpers = run("initialize", Duration.ofSeconds(10), () -> context.eval(sourceCache.get("mantis:values", """
                 (() => {
                   const parse = JSON.parse, stringify = JSON.stringify, PromiseType = Promise, ErrorType = Error;
                   const from = Array.from, assign = Object.assign, create = Object.create, BigIntType = BigInt;
@@ -51,7 +50,6 @@ public final class MantisContext implements AutoCloseable {
                     bigint: value => BigIntType(value), promise: executor => new PromiseType(executor), error: message => new ErrorType(message) };
                 })()
                 """, null, false)));
-        try {
             Map<String, Object> bindings = new LinkedHashMap<>();
             modules.forEach((name, values) -> {
                 Map<String, Object> mapped = new LinkedHashMap<>();
@@ -59,7 +57,7 @@ public final class MantisContext implements AutoCloseable {
                 bindings.put(name, readOnly(mapped));
             });
             context.getBindings("js").putMember("__mantis_bindings", readOnly(bindings));
-        } catch (RuntimeException error) { context.close(true); throw error; }
+        } catch (RuntimeException | Error error) { execution.close(); context.close(true); throw error; }
     }
 
     public synchronized Value evaluateModule(String name) {
@@ -127,21 +125,29 @@ public final class MantisContext implements AutoCloseable {
     private synchronized <T> T run(String operation, Duration limit, Supplier<T> action) {
         if (closed) throw new IllegalStateException("Script context is closed");
         if (depth > 0) return measure(operation, action);
-        depth++;
-        AtomicBoolean finished = new AtomicBoolean();
-        ScheduledFuture<?> deadline = watchdog.schedule(() -> {
-            if (finished.compareAndSet(false, true)) context.close(true);
-        }, limit.toMillis(), TimeUnit.MILLISECONDS);
         long start = System.nanoTime();
+        long deadline = execution.begin(start, limit.toNanos());
+        depth++;
+        long end = 0;
+        boolean failed = true;
         try {
             context.resetLimits();
-            return measure(operation, action);
+            T result = action.get();
+            end = System.nanoTime();
+            if (!execution.finish(deadline, end)) throw new ScriptException(operation);
+            failed = false;
+            return result;
         } catch (PolyglotException error) {
             if (error.isCancelled() || error.isResourceExhausted()) closed = true;
             throw new ScriptException(error);
         } finally {
-            finished.set(true); deadline.cancel(false);
-            invocations++; executionNanos += System.nanoTime() - start; depth--;
+            if (end == 0) end = System.nanoTime();
+            execution.finish(deadline, end);
+            diagnostics.record(operation, end - start, failed);
+            invocations++; executionNanos += end - start; depth--;
+            if (closed || execution.expired()) {
+                closed = true; execution.close(); context.close(true);
+            }
         }
     }
 
@@ -164,6 +170,6 @@ public final class MantisContext implements AutoCloseable {
     @Override public synchronized void close() {
         evaluatedModules.clear();
         functionLabels.clear();
-        if (!closed) { closed = true; context.close(true); }
+        closed = true; execution.close(); context.close(true);
     }
 }

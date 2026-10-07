@@ -27,11 +27,44 @@ class InteropTest {
         @MantisExport public String ambiguous(List<?> value) { return "list"; }
         @MantisExport public int add(int... values) { return Arrays.stream(values).sum(); }
         @MantisExport public static int twice(int value) { return value * 2; }
+        @MantisExport public long large() { return Long.MAX_VALUE; }
+        @MantisExport public List<Integer> values() { return List.of(1, 2); }
+        @MantisExport public boolean flag(boolean value) { return value; }
         @MantisExport public Data echo(Data data) { return data; }
         @MantisExport public String location(Location location) { return location.id(); }
         @MantisExport public int callback(Function<Integer, Integer> function) { return function.andThen(result -> result + 1).apply(21); }
         @MantisExport public void fail() { throw new IllegalStateException("host failure"); }
         public String secret() { return "secret"; }
+    }
+
+    @Test void cachedOverloadsAndDirectCallsStillValidateValuesAndExportNativeTypes() {
+        try (MantisEngine engine = new MantisEngine()) {
+            MantisContext[] context = new MantisContext[1];
+            TypeConversions conversions = new TypeConversions(() -> context[0]);
+            try (HostBindings bindings = new HostBindings(conversions)) {
+                context[0] = engine.createContext(Map.of("main.js", "import {host} from 'test:api'; export {host}; export const choose = x => host.choose(x);"),
+                        Map.of("test:api", Map.of("host", bindings.bind(new Host("x")))));
+                var exports = context[0].evaluateModule("main.js");
+                var choose = exports.getMember("choose");
+                for (int i = 0; i < 5; i++) {
+                    assertEquals("int", context[0].invoke(choose, 1).asString());
+                    assertEquals("long", context[0].invoke(choose, 2147483648L).asString());
+                    assertEquals("double", context[0].invoke(choose, 1.5).asString());
+                    assertEquals("string", context[0].invoke(choose, "text").asString());
+                    assertEquals("string", context[0].invoke(choose, (Object) null).asString());
+                }
+                Value host = exports.getMember("host");
+                assertTrue(context[0].invokeMember(host, "flag", true).asBoolean());
+                assertThrows(ScriptException.class, () -> context[0].invokeMember(host, "flag", "true"));
+                assertThrows(ScriptException.class, () -> context[0].invokeMember(host, "flag"));
+                assertThrows(ScriptException.class, () -> context[0].invokeMember(host, "flag", true, false));
+                assertEquals("bigint", context[0].invoke(context[0].evaluate("bigint-type.js", "host => typeof host.large()"), host).asString());
+                assertEquals(Long.MAX_VALUE, conversions.fromScript(context[0].invokeMember(host, "large"), long.class));
+                assertTrue(context[0].invoke(context[0].evaluate("native-array.js", "host => Array.isArray(host.values())"), host).asBoolean());
+                assertEquals(List.of(1, 2), conversions.fromScript(context[0].invokeMember(host, "values"), Object.class));
+                assertTrue(bindings.cacheStats().resolutionHits() > 0);
+            }
+        }
     }
 
     @Test void nativeCollectionsRecordsEnumsAndOptionalsRoundTrip() {

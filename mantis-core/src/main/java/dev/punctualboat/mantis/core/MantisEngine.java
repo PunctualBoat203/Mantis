@@ -5,18 +5,12 @@ import org.graalvm.polyglot.Engine;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
 
 public final class MantisEngine implements AutoCloseable {
     private final Engine engine = Engine.newBuilder("js").useSystemProperties(false)
             .option("engine.WarnInterpreterOnly", "false").build();
-    private final ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(task -> {
-        Thread thread = new Thread(task, "mantis-script-limits");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ExecutionWatchdog watchdog = new ExecutionWatchdog();
     private final Set<MantisContext> contexts = ConcurrentHashMap.newKeySet();
     private final SourceCache sources = new SourceCache(512, 8 * 1024 * 1024);
     private boolean closed;
@@ -49,7 +43,7 @@ public final class MantisEngine implements AutoCloseable {
         contexts.forEach(MantisContext::close);
         contexts.clear();
         sources.clear();
-        watchdog.shutdownNow();
+        watchdog.close();
         engine.close();
     }
 }

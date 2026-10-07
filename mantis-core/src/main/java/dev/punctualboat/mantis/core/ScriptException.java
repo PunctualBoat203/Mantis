@@ -12,6 +12,11 @@ public final class ScriptException extends RuntimeException {
     private final Throwable javaCause;
     private final String hostCall;
 
+    ScriptException(String operation) {
+        super(operation + ": Execution limit exceeded");
+        source = operation; line = column = 0; scriptStack = List.of(); javaCause = null; hostCall = null;
+    }
+
     public ScriptException(PolyglotException cause) {
         super(describe(cause), cause);
         SourceSection location = location(cause);

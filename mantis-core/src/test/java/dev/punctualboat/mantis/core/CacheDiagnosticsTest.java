@@ -5,6 +5,16 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CacheDiagnosticsTest {
+    @Test void hashCollisionsDoNotReuseDifferentSourceContents() {
+        assertEquals("'Aa'".hashCode(), "'BB'".hashCode());
+        try (MantisEngine engine = new MantisEngine()) {
+            var context = engine.createContext(Map.of(), Map.of());
+            assertEquals("Aa", context.evaluate("collision.js", "'Aa'").asString());
+            assertEquals("BB", context.evaluate("collision.js", "'BB'").asString());
+            assertEquals("Aa", context.evaluate("collision.js", new String("'Aa'")).asString());
+        }
+    }
+
     @Test void sharedSourcesReuseContentAndChangedContentGetsAFreshResult() {
         try (MantisEngine engine = new MantisEngine()) {
             var first = engine.createContext(Map.of(), Map.of());

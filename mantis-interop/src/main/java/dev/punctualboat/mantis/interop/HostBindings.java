@@ -60,9 +60,9 @@ public final class HostBindings implements AutoCloseable {
         if (value == null || value instanceof Value || value instanceof Proxy || value instanceof Map<?, ?> || value instanceof Collection<?>
                 || value.getClass().isRecord() || value.getClass().isArray() || value instanceof Optional<?> || value instanceof Enum<?>
                 || value instanceof Number || value instanceof String || value instanceof Boolean || value instanceof Character || conversions.hasConverter(value.getClass()))
-            return conversions.toScript(value);
+            return conversions.export(value);
         Plan plan = plan(value.getClass());
-        return plan.methods().isEmpty() && plan.properties().isEmpty() ? conversions.toScript(value) : bind(value);
+        return plan.methods().isEmpty() && plan.properties().isEmpty() ? conversions.export(value) : bind(value);
     }
 
     public final class Instance implements ProxyObject, JavaBackedValue {
@@ -143,16 +143,34 @@ public final class HostBindings implements AutoCloseable {
     private final class Group implements ProxyExecutable {
         private final Object receiver;
         private final List<Call> methods;
-        private final Map<List<String>, Call> selected = new LinkedHashMap<>();
+        private final Map<List<Object>, Call> selected = new LinkedHashMap<>();
+        private Object[] lastShape;
+        private Call lastMethod;
         private Group(Object receiver, List<Call> methods) { this.receiver = receiver; this.methods = methods; }
         @Override public Object execute(Value... arguments) {
             checkOpen();
-            List<String> shape = Arrays.stream(arguments).map(HostBindings::shape).toList();
-            Call method = selected.get(shape);
+            if (methods.size() == 1) {
+                Call method = methods.get(0);
+                int fixed = method.varargs() ? method.types().length - 1 : method.types().length;
+                if (arguments.length < fixed || !method.varargs() && arguments.length != fixed)
+                    throw new IllegalArgumentException("No exported overload accepts these arguments");
+                resolutionHits++;
+                return call(method, receiver, arguments);
+            }
+            if (lastShape != null && lastShape.length == arguments.length) {
+                int index = 0;
+                while (index < arguments.length && Objects.equals(lastShape[index], shape(arguments[index]))) index++;
+                if (index == arguments.length) { resolutionHits++; return call(lastMethod, receiver, arguments); }
+            }
+            Object[] shapes = new Object[arguments.length];
+            for (int i = 0; i < arguments.length; i++) shapes[i] = shape(arguments[i]);
+            List<Object> key = Arrays.asList(shapes);
+            Call method = selected.get(key);
             if (method == null) {
                 resolutionMisses++; method = select(methods, arguments);
-                if (selected.size() < 256) selected.put(shape, method);
+                if (selected.size() < 256) selected.put(key, method);
             } else resolutionHits++;
+            lastShape = shapes; lastMethod = method;
             return call(method, receiver, arguments);
         }
     }
@@ -320,10 +338,10 @@ public final class HostBindings implements AutoCloseable {
         }
         return strict;
     }
-    private static String shape(Value value) {
+    private static Object shape(Value value) {
         if (value.isNull()) return "null";
-        if (value.isHostObject()) return "host:" + value.asHostObject().getClass().getName();
-        if (value.isProxyObject() && value.asProxyObject() instanceof Instance instance) return "host:" + instance.target().getClass().getName();
+        if (value.isHostObject()) return value.asHostObject().getClass();
+        if (value.isProxyObject() && value.asProxyObject() instanceof Instance instance) return instance.target().getClass();
         if (value.isString()) return value.asString().length() == 1 ? "char" : "string";
         if (value.isBoolean()) return "boolean";
         if (value.fitsInByte()) return "byte"; if (value.fitsInShort()) return "short"; if (value.fitsInInt()) return "int";
