@@ -16,7 +16,7 @@ import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.graalvm.polyglot.proxy.ProxyObject;
 import org.slf4j.Logger;
@@ -51,7 +51,7 @@ public final class Mantis {
         MinecraftForge.EVENT_BUS.addListener(this::commands);
     }
 
-    private void setup(FMLCommonSetupEvent event) {
+    private void setup(FMLLoadCompleteEvent event) {
         event.enqueueWork(() -> {
             engine = new MantisEngine();
             try {

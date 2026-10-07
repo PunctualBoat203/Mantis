@@ -17,7 +17,7 @@ config/mantis/
     server_scripts/
 ```
 
-Startup scripts run once during common setup and require a game restart to change. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
+Startup scripts run once after common setup and require a game restart to change. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
 
 ## Scripts
 
@@ -92,3 +92,5 @@ Operator commands: `/mantis clock`, `/mantis status`, `/mantis reload`. Status i
 Mods register extensions with `MantisApi.registerExtension(modId, registrar -> ...)` during construction or common setup. Use `registrar.module("modid:api", Map.of("api", object))` to provide a virtual module. Annotate callable host methods with `@MantisExport`. `registrar.resources()` owns generation resources; `registrar.events()` exposes dispatch; `registrar.context()` supplies the initialized script context. Extensions may use the standalone recipe transaction classes to integrate storage outside RecipeManager.
 
 Java class lookup, unexported methods, native access, processes, threads, environment access, arbitrary files, and sockets are unavailable to scripts. Module reads use an in-memory source snapshot. Calls have statement and wall-time limits; exceeding a limit closes the affected context. This is a permissions foundation for pack-authored scripts, not a hardened untrusted-code sandbox. Host methods and extension APIs must enforce their own permissions and cancellation. CompletableFuture/Promise bridging, custom type-converter registration, Rhino migration, client scripting, and comparative benchmarks remain future work.
+
+`./gradlew :mantis-minecraft:runGameTestServer` runs an isolated Minecraft test of recipe edits, rejected reloads, timer cleanup, and saved clock data. Test scripts and structures stay out of the release JAR.

@@ -2,6 +2,7 @@
 **/build/
 **/run/
 **/run-data/
+**/run-gametest/
 .idea/
 *.iml
 .classpath
