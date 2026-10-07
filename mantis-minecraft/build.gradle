@@ -75,4 +75,4 @@ tasks.register('prepareGameTestScripts', Copy) {
     from 'src/gametest/scripts'
     into 'run-gametest/config/mantis/server_scripts'
 }
-tasks.named('runGameTestServer').configure { dependsOn 'prepareGameTestScripts' }
+tasks.matching { it.name == 'runGameTestServer' }.configureEach { dependsOn 'prepareGameTestScripts' }
