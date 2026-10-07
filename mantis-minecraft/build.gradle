@@ -56,8 +56,10 @@ dependencies {
     implementation project(':mantis-recipes')
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     ['org.graalvm.sdk:graal-sdk', 'org.graalvm.js:js', 'org.graalvm.regex:regex', 'org.graalvm.truffle:truffle-api'].each { artifact ->
+        minecraftLibrary "${artifact}:${graal_version}"
         jarJar("${artifact}:[${graal_version},23.0.13)") { jarJar.pin(it, graal_version) }
     }
+    minecraftLibrary 'com.ibm.icu:icu4j:72.1'
     jarJar('com.ibm.icu:icu4j:[72.1,73)') { jarJar.pin(it, '72.1') }
 }
 
