@@ -247,12 +247,17 @@ public final class HostBindings implements AutoCloseable {
             throw new IllegalArgumentException("Script implementation requires an approved interface: " + raw.getName());
         Method functional = sam(raw);
         if (value.canExecute() && functional == null) throw new IllegalArgumentException("Interface is not functional: " + raw.getName());
+        if (!value.canExecute()) {
+            for (Method method : raw.getMethods()) if (Modifier.isAbstract(method.getModifiers()) && !value.canInvokeMember(method.getName()))
+                throw new IllegalArgumentException("Script implementation is missing interface method: " + method.getName());
+        }
         return java.lang.reflect.Proxy.newProxyInstance(raw.getClassLoader(), new Class<?>[]{raw}, (proxy, method, arguments) -> {
             if (method.getDeclaringClass() == Object.class) return switch (method.getName()) {
                 case "equals" -> proxy == arguments[0]; case "hashCode" -> System.identityHashCode(proxy); default -> "Mantis implementation of " + raw.getName();
             };
             checkOpen();
             if (!onThread.getAsBoolean()) throw new IllegalStateException("Script callbacks require the host scheduler thread");
+            if (method.isDefault()) return InvocationHandler.invokeDefault(proxy, method, arguments == null ? new Object[0] : arguments);
             Object[] passed = arguments == null ? new Object[0] : Arrays.stream(arguments).map(conversions::toScript).toArray();
             Value result = value.canExecute() ? conversions.context().invoke(value, passed) : conversions.context().invokeMember(value, method.getName(), passed);
             return conversions.fromScript(result, resolveParameter(method.getGenericReturnType(), target, raw));

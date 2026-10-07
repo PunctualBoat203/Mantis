@@ -29,7 +29,7 @@ class InteropTest {
         @MantisExport public static int twice(int value) { return value * 2; }
         @MantisExport public Data echo(Data data) { return data; }
         @MantisExport public String location(Location location) { return location.id(); }
-        @MantisExport public int callback(Function<Integer, Integer> function) { return function.apply(21); }
+        @MantisExport public int callback(Function<Integer, Integer> function) { return function.andThen(result -> result + 1).apply(21); }
         @MantisExport public void fail() { throw new IllegalStateException("host failure"); }
         public String secret() { return "secret"; }
     }
@@ -100,6 +100,7 @@ class InteropTest {
             try (HostBindings bindings = new HostBindings(conversions)) {
                 context[0] = engine.createContext(Map.of("main.js", """
                         import {host, fn} from 'test:api';
+                        export {host};
                         export const data = host.echo({name:'x', counts:[1,2], kind:'WOOD'});
                         export const result = host.callback(x => x * 2) + fn(4);
                         export const location = host.location('test:item');
@@ -108,7 +109,8 @@ class InteropTest {
                         """), Map.of("test:api", Map.of("host", bindings.bind(new Host("x")),
                         "fn", bindings.function(Function.class, (Function<Integer, Integer>) value -> value + 1))));
                 Value exports = context[0].evaluateModule("main.js");
-                assertEquals(47, exports.getMember("result").asInt());
+                assertEquals(48, exports.getMember("result").asInt());
+                assertThrows(ScriptException.class, () -> context[0].invokeMember(exports.getMember("host"), "callback", context[0].parseJson("{}")));
                 assertEquals("test:item", exports.getMember("location").asString());
                 assertEquals(new Data("x", List.of(1,2), Optional.of(Kind.WOOD)), conversions.fromScript(exports.getMember("data"), Data.class));
                 for (int i = 0; i < 10; i++) context[0].invoke(exports.getMember("call"), 20);
