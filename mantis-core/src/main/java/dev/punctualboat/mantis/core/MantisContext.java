@@ -43,12 +43,12 @@ public final class MantisContext implements AutoCloseable {
     }
 
     public Value evaluateModule(String name) {
-        String text = sources.get(name);
-        if (text == null) throw new IllegalArgumentException("Unknown script: " + name);
+        if (!sources.containsKey(name)) throw new IllegalArgumentException("Unknown script: " + name);
         Path path = ModuleFiles.scriptPath(name);
-        Source source = Source.newBuilder("js", text, name).uri(path.toUri())
+        String entry = "export * as namespace from '" + path.toUri().toASCIIString() + "';";
+        Source source = Source.newBuilder("js", entry, name + " [entry]").uri(Path.of("/mantis/entries").resolve(name).toUri())
                 .mimeType("application/javascript+module").buildLiteral();
-        return run(Duration.ofSeconds(10), () -> context.eval(source));
+        return run(Duration.ofSeconds(10), () -> context.eval(source).getMember("namespace"));
     }
 
     public Value evaluate(String name, String code) {

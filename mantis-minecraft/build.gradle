@@ -25,7 +25,14 @@ minecraft {
             property 'forge.logging.console.level', 'info'
             property 'mixin.env.remapRefMap', 'true'
             property 'mixin.env.refMapRemappingFile', "${buildDir}/createSrgToMcp/output.srg"
-            mods { mantis { source sourceSets.main } }
+            mods {
+                mantis {
+                    source sourceSets.main
+                    source project(':mantis-core').sourceSets.main
+                    source project(':mantis-runtime').sourceSets.main
+                    source project(':mantis-recipes').sourceSets.main
+                }
+            }
         }
         client {}
         server { args '--nogui' }

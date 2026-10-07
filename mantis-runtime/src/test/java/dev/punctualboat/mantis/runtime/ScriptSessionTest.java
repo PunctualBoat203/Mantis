@@ -67,6 +67,16 @@ class ScriptSessionTest {
         }
     }
 
+    @Test void importingADiscoveredScriptDoesNotRunItTwice() {
+        Map<String, String> sources = Map.of(
+                "main.js", "import {value} from './lib/value.mjs';",
+                "lib/value.mjs", "import {events} from 'mantis:events'; events.on('ping', () => {}); export const value = 1;");
+        try (MantisEngine engine = new MantisEngine(); TickClock clock = new TickClock();
+             ScriptSession session = new ScriptSession(engine, sources, clock, message -> {}, error -> fail(error), registrar -> {})) {
+            assertEquals(1, session.events().listenerCount());
+        }
+    }
+
     @Test void onceUnsubscribesBeforeRecursiveDispatchAndFailuresAreIsolated() {
         List<Throwable> errors = new ArrayList<>();
         EventBus events = new EventBus(errors::add);

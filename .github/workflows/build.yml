@@ -22,7 +22,14 @@ jobs:
       - name: Run tests and build Forge mod
         run: ./gradlew test :mantis-minecraft:build --stacktrace
       - name: Verify Minecraft recipe and script reloads
-        run: ./gradlew :mantis-minecraft:runGameTestServer --stacktrace
+        run: |
+          ./gradlew :mantis-minecraft:runGameTestServer --stacktrace | tee gametest.log
+          python3 - <<'PY'
+          import pathlib, re
+          log = pathlib.Path('gametest.log').read_text()
+          if not re.search(r'All [1-9][0-9]* required tests passed', log):
+              raise SystemExit('Minecraft did not report a completed passing GameTest run')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
