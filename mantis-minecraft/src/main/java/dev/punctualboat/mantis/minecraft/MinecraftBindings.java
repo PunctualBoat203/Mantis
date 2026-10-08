@@ -86,7 +86,10 @@ public final class MinecraftBindings {
         private final ServerLevel level;
         public LevelRef(ServerLevel level) { this.level = level; }
         private void check() { if (!level.getServer().isSameThread()) throw new IllegalStateException("Level operations require the server thread"); }
-        private static BlockPos pos(int x, int y, int z) { if (Math.abs((long)x) > 30000000 || Math.abs((long)z) > 30000000) throw new IllegalArgumentException("Position outside world bounds"); return new BlockPos(x,y,z); }
+        private BlockPos pos(int x, int y, int z) {
+            if (Math.abs((long)x) >= 30000000 || Math.abs((long)z) >= 30000000 || level.isOutsideBuildHeight(y)) throw new IllegalArgumentException("Position outside world bounds");
+            return new BlockPos(x,y,z);
+        }
         @MantisExport public String dimension() { check(); return level.dimension().location().toString(); }
         @MantisExport public String block(int x,int y,int z) { check(); return java.util.Objects.requireNonNull(ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos(x,y,z)).getBlock())).toString(); }
         @MantisExport public boolean setBlock(int x,int y,int z,String id) {

@@ -57,7 +57,7 @@ public final class MantisGameTests {
             helper.assertTrue(rejected, "Generated resources must reject parent path segments");
             data.freeze(); registry.freeze();
             try (PackResources server = data.open("test-server", PackType.SERVER_DATA); PackResources assets = data.open("test-assets", PackType.CLIENT_RESOURCES)) {
-                helper.assertTrue(server.getMetadataSection(PackMetadataSection.SERIALIZER) != null && assets.getMetadataSection(PackMetadataSection.SERIALIZER) != null, "Generated packs must expose valid pack metadata");
+                helper.assertTrue(server.getMetadataSection(PackMetadataSection.TYPE) != null && assets.getMetadataSection(PackMetadataSection.TYPE) != null, "Generated packs must expose valid pack metadata");
                 JsonObject item = read(assets, PackType.CLIENT_RESOURCES, "mantis:models/item/inspection.json");
                 helper.assertTrue(item.getAsJsonObject("textures").get("layer0").getAsString().equals("minecraft:item/emerald"), "Generated item model must use the declared texture");
                 helper.assertTrue(read(assets, PackType.CLIENT_RESOURCES, "mantis:blockstates/inspection_block.json").getAsJsonObject("variants").has(""), "Generated cube block must have a blockstate");

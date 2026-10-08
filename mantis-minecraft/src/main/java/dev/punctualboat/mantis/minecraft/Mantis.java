@@ -85,28 +85,28 @@ public final class Mantis {
     private synchronized void prepareStartup() {
         if (startup != null) return;
         if (engine == null) { engine = new MantisEngine(config.limits()); log("JavaScript runtime: " + engine.runtimeName()); }
-            try {
-                startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
-                        Mantis::log, Mantis::report, registrar -> {
-                    registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
-                    registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
-                    registrar.module("minecraft:registries", Map.of("registries", registries));
-                    registrar.module("minecraft:schemas", Map.of("schemas", new MantisApi.Schemas()));
-                    registrar.module("minecraft:data", Map.of("data", data));
-                    MinecraftBindings.register(registrar);
-                    MantisApi.registerModules(registrar, false);
-                }, false);
-                startup.events().emitStrict("startup", Map.of("version", ModList.get().getModContainerById("mantis").orElseThrow().getModInfo().getVersion().toString()));
-            } catch (IOException | RuntimeException error) {
-                if (startup != null) { startup.close(); startup = null; }
-                throw new IllegalStateException("Mantis startup scripts failed", error);
-            }
+        try {
+            startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
+                    Mantis::log, Mantis::report, registrar -> {
+                registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
+                registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
+                registrar.module("minecraft:registries", Map.of("registries", registries));
+                registrar.module("minecraft:schemas", Map.of("schemas", new MantisApi.Schemas()));
+                registrar.module("minecraft:data", Map.of("data", data));
+                MinecraftBindings.register(registrar);
+                MantisApi.registerModules(registrar, false);
+            }, false);
+            startup.events().emitStrict("startup", Map.of("version", ModList.get().getModContainerById("mantis").orElseThrow().getModInfo().getVersion().toString()));
+        } catch (IOException | RuntimeException error) {
+            if (startup != null) { startup.close(); startup = null; }
+            throw new IllegalStateException("Mantis startup scripts failed", error);
+        }
         registries.freeze();
         data.freeze();
     }
 
     public static MantisEngine engine() {
-        if (instance == null || instance.engine == null) throw new IllegalStateException("Mantis has not completed common setup");
+        if (instance == null || instance.engine == null) throw new IllegalStateException("Mantis has not initialized its script engine");
         return instance.engine;
     }
     public static MantisConfig config() { return instance == null || instance.config == null ? MantisConfig.DEFAULT : instance.config; }
