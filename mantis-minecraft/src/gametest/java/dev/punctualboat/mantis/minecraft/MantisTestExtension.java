@@ -17,6 +17,7 @@ public final class MantisTestExtension {
     private static final List<CompletableFuture<?>> HELD = new CopyOnWriteArrayList<>();
     static boolean failRegistration;
     static int registrationAttempts;
+    private static final Map<String, Integer> MARKS = new ConcurrentHashMap<>();
     @SubscribeEvent public static void setup(FMLCommonSetupEvent event) {
         MantisApi.registerExtension("mantis_test", registrar -> {
             registrationAttempts++;
@@ -26,6 +27,7 @@ public final class MantisTestExtension {
     }
     public record Data(ResourceLocation id, Component component, List<Integer> values) {}
     public static final class Host {
+        @MantisExport public void mark(String name) { MARKS.merge(name, 1, Integer::sum); }
         @MantisExport public CompletableFuture<Data> load() {
             return CompletableFuture.supplyAsync(() -> new Data(new ResourceLocation("mantis:async"), Component.literal("async"), List.of(20, 22)));
         }
@@ -38,4 +40,5 @@ public final class MantisTestExtension {
     }
     public static long activeFutures() { return HELD.stream().filter(future -> !future.isDone()).count(); }
     public static long cancelledFutures() { return HELD.stream().filter(CompletableFuture::isCancelled).count(); }
+    public static int marks(String name) { return MARKS.getOrDefault(name, 0); }
 }

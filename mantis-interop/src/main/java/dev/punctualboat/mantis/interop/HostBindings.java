@@ -38,6 +38,10 @@ public final class HostBindings implements AutoCloseable {
         this.conversions = Objects.requireNonNull(conversions);
         this.onThread = Objects.requireNonNull(onThread);
         conversions.interfaces(this::interfaceValue);
+        conversions.objects(value -> {
+            Plan plan = plan(value.getClass());
+            return plan.methods().isEmpty() && plan.properties().isEmpty() ? value : bind(value);
+        });
     }
     public HostBindings(TypeConversions conversions) { this(conversions, () -> true); }
 

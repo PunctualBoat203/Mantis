@@ -143,10 +143,24 @@ public final class ScriptSession implements AutoCloseable {
     public final class EventsApi {
         @MantisExport public EventBus.Subscription on(String name, Value callback) { return subscribe(name, callback, false); }
         @MantisExport public EventBus.Subscription once(String name, Value callback) { return subscribe(name, callback, true); }
+        @MantisExport public EventBus.Subscription on(String name, Value filter, Value callback) { return subscribe(name, callback, false, eventFilter(filter)); }
+        @MantisExport public EventBus.Subscription once(String name, Value filter, Value callback) { return subscribe(name, callback, true, eventFilter(filter)); }
+        private java.util.function.Predicate<Object> eventFilter(Value value) {
+            if (!value.hasMembers() || value.hasArrayElements()) throw new IllegalArgumentException("Event filter must be an object");
+            Map<String, String> expected = new LinkedHashMap<>();
+            for (String key : value.getMemberKeys()) {
+                if (!Set.of("item", "block", "entityType", "dimension").contains(key) || !value.getMember(key).isString()) throw new IllegalArgumentException("Event filters accept item, block, entityType, or dimension strings");
+                expected.put(key, value.getMember(key).asString());
+            }
+            return event -> expected.entrySet().stream().allMatch(e -> Objects.equals(e.getValue(), event instanceof Map<?, ?> map ? map.get(e.getKey()) : event instanceof org.graalvm.polyglot.proxy.ProxyObject proxy ? proxy.getMember(e.getKey()) : null));
+        }
         private EventBus.Subscription subscribe(String name, Value callback, boolean once) {
+            return subscribe(name, callback, once, event -> true);
+        }
+        private EventBus.Subscription subscribe(String name, Value callback, boolean once, java.util.function.Predicate<Object> filter) {
             if (!callback.canExecute()) throw new IllegalArgumentException("Event callback must be a function");
             boolean loadPhase = LOAD_EVENTS.contains(name);
-            EventBus.Subscription subscription = events.subscribe(name, event -> {
+            EventBus.Subscription subscription = events.subscribe(name, filter, event -> {
                 if (context == null || context.isClosed()) return;
                 Supplier<Value> dispatch = () -> context.invoke(callback, bindings.export(event));
                 if (loadPhase) context.loadAccess("event:" + name, dispatch);

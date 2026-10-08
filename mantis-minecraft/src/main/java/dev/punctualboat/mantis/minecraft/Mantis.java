@@ -20,8 +20,12 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import org.graalvm.polyglot.proxy.ProxyObject;
 import org.slf4j.Logger;
+import net.minecraftforge.registries.RegisterEvent;
+import net.minecraftforge.event.AddPackFindersEvent;
+import net.minecraft.server.packs.PackType;
+import net.minecraft.server.packs.repository.Pack;
+import net.minecraft.server.packs.repository.PackSource;
 
 import java.io.IOException;
 import java.util.Map;
@@ -39,6 +43,8 @@ public final class Mantis {
     private PreparedScripts active;
     private ClockData clockData;
     private TickClock clock;
+    private final StartupRegistries registries = new StartupRegistries();
+    private final StartupData data = new StartupData();
 
     public Mantis() {
         instance = this;
@@ -46,6 +52,8 @@ public final class Mantis {
         catch (IOException error) { throw new IllegalStateException("Could not create Mantis script directories", error); }
         config = MantisConfig.load(ScriptDirectories.ROOT.resolve("mantis.properties"), Mantis::log);
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
+        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::register);
+        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::packs);
         MinecraftForge.EVENT_BUS.addListener(this::reloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::started);
         MinecraftForge.EVENT_BUS.addListener(this::stopping);
@@ -57,21 +65,44 @@ public final class Mantis {
 
     private void setup(FMLLoadCompleteEvent event) {
         event.enqueueWork(() -> {
-            engine = new MantisEngine(config.limits());
-            log("JavaScript runtime: " + engine.runtimeName());
+            prepareStartup();
+            MantisApi.freeze();
+        });
+    }
+
+    private void register(RegisterEvent event) { prepareStartup(); registries.register(event); }
+    private void packs(AddPackFindersEvent event) {
+        if (event.getPackType() != PackType.SERVER_DATA) return;
+        prepareStartup();
+        event.addRepositorySource(accept -> {
+            Pack pack = Pack.readMetaAndCreate("mantis:generated", Component.literal("Mantis startup data"), true,
+                    data::open, PackType.SERVER_DATA, Pack.Position.TOP, PackSource.BUILT_IN);
+            if (pack == null) throw new IllegalStateException("Could not load Mantis generated pack metadata");
+            accept.accept(pack);
+        });
+    }
+
+    private synchronized void prepareStartup() {
+        if (startup != null) return;
+        if (engine == null) { engine = new MantisEngine(config.limits()); log("JavaScript runtime: " + engine.runtimeName()); }
             try {
                 startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
                         Mantis::log, Mantis::report, registrar -> {
                     registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
+                    registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
+                    registrar.module("minecraft:registries", Map.of("registries", registries));
+                    registrar.module("minecraft:schemas", Map.of("schemas", new MantisApi.Schemas()));
+                    registrar.module("minecraft:data", Map.of("data", data));
                     MinecraftBindings.register(registrar);
-                    MantisApi.registerModules(registrar);
+                    MantisApi.registerModules(registrar, false);
                 }, false);
-                startup.events().emitStrict("startup", ProxyObject.fromMap(Map.of("version", ModList.get().getModContainerById("mantis").orElseThrow().getModInfo().getVersion().toString())));
+                startup.events().emitStrict("startup", Map.of("version", ModList.get().getModContainerById("mantis").orElseThrow().getModInfo().getVersion().toString()));
             } catch (IOException | RuntimeException error) {
                 if (startup != null) { startup.close(); startup = null; }
                 throw new IllegalStateException("Mantis startup scripts failed", error);
             }
-        });
+        registries.freeze();
+        data.freeze();
     }
 
     public static MantisEngine engine() {
@@ -141,10 +172,16 @@ public final class Mantis {
     private boolean hasListeners(String name) {
         return active != null && active.session().events().hasListeners(name) || startup != null && startup.events().hasListeners(name);
     }
+    public static boolean listens(String name) { return instance != null && instance.hasListeners(name); }
+    public static void dispatch(String name, Map<String, Object> data) {
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null || !server.isSameThread()) throw new IllegalStateException("Minecraft events must dispatch on the server thread");
+        instance.emit(name, data);
+    }
 
     private void emit(String name, Map<String, Object> data) {
-        if (active != null && active.session().events().hasListeners(name)) active.session().events().emit(name, ProxyObject.fromMap(data));
-        if (startup != null && startup.events().hasListeners(name)) startup.events().emit(name, ProxyObject.fromMap(data));
+        if (active != null && active.session().events().hasListeners(name)) active.session().events().emit(name, data);
+        if (startup != null && startup.events().hasListeners(name)) startup.events().emit(name, data);
     }
 
     private void loggedIn(PlayerEvent.PlayerLoggedInEvent event) {

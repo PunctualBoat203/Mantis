@@ -8,6 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraftforge.common.crafting.CraftingHelper;
 import net.minecraftforge.common.crafting.conditions.ICondition;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.io.IOException;
 import java.util.*;
@@ -39,7 +41,7 @@ public final class RecipeReload {
             Map<String, String> sources = skipScripts ? Map.<String, String>of() : ScriptSources.load(ScriptDirectories.SERVER);
             session = new ScriptSession(Mantis.engine(), sources, null,
                     Mantis::log, Mantis::report, registrar -> {
-                recipes[0] = new RecipesApi(registrar.context());
+                recipes[0] = new RecipesApi(registrar.context(), MantisApi.recipeSchemas());
                 registrar.module("minecraft:recipes", Map.of("recipes", recipes[0]));
                 registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
                 registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
@@ -52,7 +54,14 @@ public final class RecipeReload {
         try {
             Map<String, JsonObject> originals = new TreeMap<>();
             jsons.forEach((id, json) -> { if (json.isJsonObject() && !id.getPath().startsWith("_")) originals.put(id.toString(), json.getAsJsonObject()); });
-            RecipeTransaction transaction = RecipeTransaction.borrowing(originals);
+            Map<String, Set<String>> tagCache = new HashMap<>();
+            RecipeMatcher.TagLookup tags = (tag, item) -> tagCache.computeIfAbsent(tag, key -> {
+                Set<String> values = new HashSet<>();
+                var holders = conditions.getAllTags(Registries.ITEM).get(new ResourceLocation(key));
+                if (holders != null) holders.forEach(holder -> values.add(BuiltInRegistries.ITEM.getKey(holder.value()).toString()));
+                return values;
+            }).contains(item);
+            RecipeTransaction transaction = RecipeTransaction.borrowing(originals, recipes[0].schemas(), tags);
             recipes[0].begin(transaction);
             try { session.events().emitStrict("recipes", recipes[0]); }
             finally { recipes[0].end(); }

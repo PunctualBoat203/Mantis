@@ -35,6 +35,7 @@ public final class TypeConversions {
     private final Map<Class<?>, Registered> converters = new LinkedHashMap<>();
     private final Map<Class<?>, Optional<Registered>> resolved = new HashMap<>();
     private BiFunction<Value, Type, Object> interfaceAdapter;
+    private Function<Object, Object> objectAdapter;
     private boolean frozen;
 
     public TypeConversions(Supplier<MantisContext> context) { this.context = Objects.requireNonNull(context); }
@@ -58,6 +59,10 @@ public final class TypeConversions {
     public void interfaces(BiFunction<Value, Type, Object> adapter) {
         if (frozen) throw new IllegalStateException("Converters are frozen");
         interfaceAdapter = Objects.requireNonNull(adapter);
+    }
+    void objects(Function<Object, Object> adapter) {
+        if (frozen) throw new IllegalStateException("Converters are frozen");
+        objectAdapter = Objects.requireNonNull(adapter);
     }
     public void freeze() { frozen = true; }
 
@@ -83,7 +88,7 @@ public final class TypeConversions {
         if (value instanceof Optional<?> optional) return encode(optional.orElse(null), path, depth + 1);
         if (value instanceof Enum<?> enumeration) return enumeration.name();
         boolean structured = value instanceof Collection<?> || value instanceof Map<?, ?> || value.getClass().isArray() || value.getClass().isRecord();
-        if (!structured) return value;
+        if (!structured) return objectAdapter == null ? value : objectAdapter.apply(value);
         if (path == null) path = new IdentityHashMap<>();
         if (path.put(value, true) != null) throw new IllegalArgumentException("Cyclic Java collection or record");
         try {

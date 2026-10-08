@@ -3,6 +3,7 @@ import { clock } from 'mantis:clock';
 import { recipes } from 'minecraft:recipes';
 import { lifecycle } from 'mantis:lifecycle';
 import { test } from 'mantis_test:async';
+import { server } from 'minecraft:server';
 
 test.hold();
 test.load().then(data => {
@@ -24,6 +25,22 @@ events.once('server.reloaded', () => {
 });
 
 events.on('recipes', () => {
+  recipes.shaped('mantis:built_shaped', recipes.item('mantis:script_item', 2), ['AA'], { A: 'stone' });
+  recipes.shapeless('mantis:built_shapeless', 'stick', ['stone']);
+  if (!recipes.contains({ id: 'mantis:built_shapeless', input: '#mantis:script_inputs' })) {
+    throw new Error('Recipe filters must use tags from the current reload');
+  }
+  recipes.replaceInput({ id: 'mantis:built_shapeless' }, '#mantis:script_inputs', 'gravel');
+  for (const kind of ['smelting', 'blasting', 'smoking', 'campfire']) {
+    recipes[kind]('mantis:built_' + kind, 'iron_ingot', 'raw_iron').experience(0.5).cookingTime(40);
+  }
+  recipes.stonecutting('mantis:built_cut', recipes.item('stone_slab', 2), 'stone');
+  recipes.smithing('mantis:built_smith', 'netherite_sword', 'netherite_upgrade_smithing_template', 'diamond_sword', 'netherite_ingot');
+  recipes.create('mantis:built_infusion', 'mantis:test_infusion', {
+    inputs: ['mantis:script_item'], outputs: [recipes.item('emerald', 4)], energy: 500, duration: 10
+  });
+  recipes.replaceInput({ id: 'mantis:built_infusion' }, '#mantis:script_inputs', 'iron_ingot');
+  recipes.replaceOutput({ id: 'mantis:built_infusion' }, 'emerald', 'diamond');
   recipes.set({ type: 'mantis:test_infusion' }, '/fusion/energy', 32000);
   recipes.set({ id: 'mantis:infusion' }, '/outputs/0/count', 2);
   recipes.patch({ type: 'mantis:test_infusion' }, json => {
@@ -39,4 +56,27 @@ events.on('recipes', () => {
     json.result.count = 4;
     return json;
   });
+});
+
+events.on('entity.hurt', { entityType: 'minecraft:zombie', dimension: 'minecraft:overworld' }, event => {
+  event.control.damage(2);
+  event.entity.data('hurt', 'yes');
+  const position = event.entity.position();
+  if (!Number.isFinite(position.x) || event.entity.health() <= 0 || !Array.isArray(server.players())
+      || server.level(event.dimension).dimension() !== event.dimension) throw new Error('Entity/server binding conversion failed');
+  test.mark('hurt');
+});
+events.once('block.broken', { block: 'minecraft:stone' }, event => {
+  event.control.cancel();
+  if (!event.control.cancelled() || event.position.y !== event.player.position().y
+      || event.level.block(event.position.x, event.position.y, event.position.z) !== 'minecraft:stone') {
+    throw new Error('Block event position/player/level bindings failed');
+  }
+  event.player.data('block', 'yes');
+  event.player.give('mantis:script_item', 3);
+  test.mark('block');
+});
+events.on('item.crafted', { item: 'mantis:script_item' }, event => {
+  if (event.stack.id() !== 'mantis:script_item' || event.stack.count() !== 2) throw new Error('Stack binding failed');
+  test.mark('craft');
 });

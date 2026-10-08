@@ -12,6 +12,40 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ScriptSessionTest {
+    @Test void filtersSkipGuestConversionAndPreserveOnceUntilAMatch() {
+        List<String> calls = new ArrayList<>();
+        AtomicInteger conversions = new AtomicInteger();
+        try (MantisEngine engine = new MantisEngine();
+             ScriptSession session = new ScriptSession(engine, Map.of("main.js", """
+                 import {events} from 'mantis:events';
+                 import {console} from 'mantis:console';
+                 const filter = {item: 'minecraft:stone', dimension: 'minecraft:overworld'};
+                 events.once('item.crafted', filter, value => console.log(value.extra));
+                 filter.item = 'minecraft:dirt';
+                 """), null, calls::add, error -> fail(error), registrar -> registrar.conversions().register(SlowValue.class, value -> {
+                     conversions.incrementAndGet(); return "converted";
+                 }, value -> new SlowValue()))) {
+            session.events().emit("item.crafted", Map.of("item", "minecraft:dirt", "dimension", "minecraft:overworld", "extra", new SlowValue()));
+            assertTrue(calls.isEmpty()); assertEquals(0, conversions.get()); assertEquals(1, session.ownedResources());
+            session.events().emit("item.crafted", Map.of("item", "minecraft:stone", "dimension", "minecraft:overworld", "extra", new SlowValue()));
+            assertEquals(List.of("converted"), calls); assertEquals(1, conversions.get()); assertEquals(0, session.ownedResources());
+            assertFalse(session.events().hasListeners("item.crafted"));
+        }
+    }
+
+    @Test void failingFiltersAreIsolatedAndNonmatchesDoNotResetTheFailureBudget() {
+        List<Throwable> errors = new ArrayList<>(); EventBus events = new EventBus(errors::add, 2);
+        AtomicInteger healthy = new AtomicInteger();
+        events.subscribe("ping", value -> { if (Boolean.TRUE.equals(value)) throw new IllegalArgumentException("filter"); return false; }, value -> fail("Should not enter callback"), false);
+        events.subscribe("ping", value -> healthy.incrementAndGet(), false);
+        events.emit("ping", true); events.emitStrict("ping", false); events.emit("ping", true);
+        assertEquals(2, errors.size()); assertEquals(3, healthy.get()); assertEquals(1, events.listenerCount());
+        EventBus strict = new EventBus(errors::add, 1);
+        strict.subscribe("ping", value -> { throw new IllegalArgumentException("filter"); }, value -> {}, false);
+        assertThrows(IllegalArgumentException.class, () -> strict.emitStrict("ping", null));
+        assertFalse(strict.hasListeners("ping"));
+    }
+
     private static final String SCRIPT = "import {events} from 'mantis:events'; import {clock} from 'mantis:clock'; import {console} from 'mantis:console'; events.on('ping', () => console.log('event')); clock.every(1, () => console.log('timer'));";
 
     public static final class SlowValue {}

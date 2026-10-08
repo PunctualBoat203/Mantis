@@ -29,6 +29,7 @@ class InteropTest {
         @MantisExport public static int twice(int value) { return value * 2; }
         @MantisExport public long large() { return Long.MAX_VALUE; }
         @MantisExport public List<Integer> values() { return List.of(1, 2); }
+        @MantisExport public List<Host> nested() { return List.of(this); }
         @MantisExport public boolean flag(boolean value) { return value; }
         @MantisExport public Data echo(Data data) { return data; }
         @MantisExport public String location(Location location) { return location.id(); }
@@ -62,6 +63,7 @@ class InteropTest {
                 assertEquals(Long.MAX_VALUE, conversions.fromScript(context[0].invokeMember(host, "large"), long.class));
                 assertTrue(context[0].invoke(context[0].evaluate("native-array.js", "host => Array.isArray(host.values())"), host).asBoolean());
                 assertEquals(List.of(1, 2), conversions.fromScript(context[0].invokeMember(host, "values"), Object.class));
+                assertTrue(context[0].invoke(context[0].evaluate("nested.js", "host => {const values=host.nested();return Array.isArray(values) && values[0]===host && values[0].values()[1]===2 && typeof values[0].secret==='undefined'}"), host).asBoolean());
                 assertTrue(bindings.cacheStats().resolutionHits() > 0);
             }
         }

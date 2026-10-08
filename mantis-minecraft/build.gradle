@@ -94,4 +94,8 @@ tasks.register('prepareGameTestScripts', Copy) {
         else failure.delete()
     }
 }
-tasks.matching { it.name == 'runGameTestServer' }.configureEach { dependsOn 'prepareGameTestScripts' }
+tasks.register('prepareGameTestStartupScripts', Copy) {
+    from 'src/gametest/startup_scripts'
+    into 'run-gametest/config/mantis/startup_scripts'
+}
+tasks.matching { it.name == 'runGameTestServer' }.configureEach { dependsOn 'prepareGameTestScripts', 'prepareGameTestStartupScripts' }

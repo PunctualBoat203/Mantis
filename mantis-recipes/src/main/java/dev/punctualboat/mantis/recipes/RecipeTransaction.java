@@ -10,15 +10,37 @@ public final class RecipeTransaction {
     private final Map<String, JsonObject> staged = new TreeMap<>();
     private final Set<String> changed = new LinkedHashSet<>();
     private boolean committed;
+    private final RecipeSchemas schemas;
+    private final RecipeMatcher.TagLookup tags;
 
     public RecipeTransaction(Map<String, JsonObject> original) { this(original, false); }
 
-    private RecipeTransaction(Map<String, JsonObject> original, boolean borrow) {
+    private RecipeTransaction(Map<String, JsonObject> original, boolean borrow) { this(original, borrow, new RecipeSchemas(), (tag, item) -> false); }
+    private RecipeTransaction(Map<String, JsonObject> original, boolean borrow, RecipeSchemas schemas, RecipeMatcher.TagLookup tags) {
+        this.schemas = Objects.requireNonNull(schemas); this.tags = Objects.requireNonNull(tags);
         original.forEach((id, json) -> staged.put(id, borrow ? json : json.deepCopy()));
     }
 
     /** The caller owns the source JSON and must keep it unchanged until commit. Writes and reads remain detached. */
     public static RecipeTransaction borrowing(Map<String, JsonObject> original) { return new RecipeTransaction(original, true); }
+    public static RecipeTransaction borrowing(Map<String, JsonObject> original, RecipeSchemas schemas, RecipeMatcher.TagLookup tags) { return new RecipeTransaction(original, true, schemas, tags); }
+
+    public int replaceValues(RecipeFilter filter, JsonElement from, JsonElement to, String role) {
+        checkOpen();
+        if (!Set.of("input", "output").contains(role)) throw new IllegalArgumentException("Invalid recipe role");
+        JsonElement selector = RecipeMatcher.selector(from);
+        JsonElement replacement;
+        if (to.isJsonObject() && to.getAsJsonObject().has("fluid")) replacement = RecipeValues.fluid(to);
+        else replacement = role.equals("input") ? RecipeValues.ingredient(to) : RecipeValues.stack(to);
+        if (!replacement.isJsonObject()) throw new IllegalArgumentException("Replacement must be one item, tag, or fluid");
+        if (to.isJsonPrimitive() && replacement.getAsJsonObject().has("count")) replacement.getAsJsonObject().remove("count");
+        Map<String, JsonObject> updates = new LinkedHashMap<>();
+        for (String id : matching(filter)) if (RecipeMatcher.matchesRole(staged.get(id), role, selector, schemas, tags)) {
+            JsonObject copy = staged.get(id).deepCopy(); RecipeMatcher.replaceRole(copy, role, selector, replacement, schemas, tags); validateShape(copy); updates.put(id, copy);
+        }
+        updates.forEach((id, json) -> { staged.put(id, json); changed.add(id); });
+        return updates.size();
+    }
 
     public record Changes(Map<String, JsonObject> replacements, Set<String> removed) {
         public Changes { replacements = Collections.unmodifiableMap(new TreeMap<>(replacements)); removed = Set.copyOf(removed); }
@@ -68,9 +90,9 @@ public final class RecipeTransaction {
         checkOpen();
         if (filter.id() != null) {
             JsonObject json = staged.get(filter.id());
-            return json != null && filter.matches(filter.id(), json) ? List.of(filter.id()) : List.of();
+            return json != null && filter.matches(filter.id(), json, schemas, tags) ? List.of(filter.id()) : List.of();
         }
-        return staged.entrySet().stream().filter(entry -> filter.matches(entry.getKey(), entry.getValue())).map(Map.Entry::getKey).toList();
+        return staged.entrySet().stream().filter(entry -> filter.matches(entry.getKey(), entry.getValue(), schemas, tags)).map(Map.Entry::getKey).toList();
     }
 
     public JsonObject get(String id) {

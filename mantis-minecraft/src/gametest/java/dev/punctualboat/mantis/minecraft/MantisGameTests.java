@@ -10,6 +10,21 @@ import net.minecraftforge.gametest.GameTestHolder;
 import net.minecraftforge.gametest.PrefixGameTestTemplate;
 import net.minecraftforge.common.crafting.conditions.ICondition;
 import com.google.gson.*;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.parameters.*;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.util.FakePlayerFactory;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -65,6 +80,7 @@ public final class MantisGameTests {
             }
             if (stage == 0) {
                 verifyRecipe();
+                verifyGameplay();
                 helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 1, "Expected one active script timer");
                 helper.assertTrue(ClockData.get(server).clock().remaining("mantis:async") > 0, "Async values must convert and resume on the server thread");
                 helper.assertTrue(ClockData.get(server).clock().remaining("mantis:lifecycle") > 0, "Lifecycle start hook must run after clock attachment");
@@ -91,6 +107,7 @@ public final class MantisGameTests {
                 helper.assertTrue(!reload.isCompletedExceptionally(), "Corrected scripts must reload successfully");
                 verifyRecipe();
                 var clock = ClockData.get(server).clock();
+                verifyGameplay();
                 helper.assertTrue(clock.ticks() > initialTick, "Internal clock must keep advancing through reloads");
                 helper.assertTrue(clock.scheduledTasks() == 1, "Successful reload must replace the old timer");
                 helper.assertTrue(clock.remaining("mantis:smoke") > 0, "Reload must preserve named cooldowns");
@@ -126,6 +143,7 @@ public final class MantisGameTests {
         }
 
         private void verifyRecipe() {
+            verifyContent();
             var recipe = server.getRecipeManager().byKey(new ResourceLocation("mantis:smoke"));
             helper.assertTrue(recipe.isPresent(), "Scripted recipe must load through RecipeManager");
             var result = recipe.orElseThrow().getResultItem(server.registryAccess());
@@ -139,6 +157,62 @@ public final class MantisGameTests {
             helper.assertTrue(infusion.json().getAsJsonObject("ritual").get("duration").getAsInt() == 400
                     && infusion.json().getAsJsonObject("ritual").getAsJsonObject("extra").get("preserved").getAsBoolean(),
                     "Generic patching must change ritual fields and preserve opaque metadata through reloads");
+        }
+
+        private void verifyContent() {
+            var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation("mantis:script_item"));
+            helper.assertTrue(item != null && item.getMaxStackSize() == 16 && item.isFireResistant(), "Startup item properties must reach the Forge registry");
+            var food = ForgeRegistries.ITEMS.getValue(new ResourceLocation("mantis:script_food"));
+            helper.assertTrue(food != null && food.getFoodProperties() != null && food.getFoodProperties().getNutrition() == 3, "Startup food properties must register");
+            var block = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("mantis:script_block"));
+            helper.assertTrue(block != null && block.defaultBlockState().getLightEmission() == 7
+                    && ForgeRegistries.ITEMS.containsKey(new ResourceLocation("mantis:script_block")), "Startup block and its block item must register");
+            helper.assertTrue(item.builtInRegistryHolder().is(TagKey.create(Registries.ITEM, new ResourceLocation("mantis:script_inputs"))), "Generated item tags must bind to the new item");
+            helper.assertTrue(block.builtInRegistryHolder().is(TagKey.create(Registries.BLOCK, new ResourceLocation("mantis:script_blocks"))), "Generated block tags must bind to the new block");
+            var drops = server.getLootData().getLootTable(new ResourceLocation("mantis:chests/script_reward")).getRandomItems(
+                    new LootParams.Builder(helper.getLevel()).withParameter(LootContextParams.ORIGIN, Vec3.ZERO).create(LootContextParamSets.CHEST));
+            helper.assertTrue(drops.size() == 1 && drops.get(0).is(item) && drops.get(0).getCount() == 2, "Generated loot table must produce the scripted item");
+            for (String kind : List.of("shaped", "shapeless", "smelting", "blasting", "smoking", "campfire", "cut", "smith", "infusion"))
+                helper.assertTrue(server.getRecipeManager().byKey(new ResourceLocation("mantis:built_" + kind)).isPresent(), "Recipe builder must load: " + kind);
+            var shaped = server.getRecipeManager().byKey(new ResourceLocation("mantis:built_shaped")).orElseThrow().getResultItem(server.registryAccess());
+            helper.assertTrue(shaped.is(item) && shaped.getCount() == 2, "Vanilla builder must use newly registered content");
+            var shapeless = server.getRecipeManager().byKey(new ResourceLocation("mantis:built_shapeless")).orElseThrow();
+            helper.assertTrue(shapeless.getIngredients().get(0).test(new ItemStack(Items.GRAVEL)), "Fresh generated tag must match replacement during recipe loading");
+            var infusion = (InfusionTestRecipe.Infusion) server.getRecipeManager().byKey(new ResourceLocation("mantis:built_infusion")).orElseThrow();
+            helper.assertTrue(infusion.energy() == 500 && infusion.getResultItem(server.registryAccess()).is(Items.DIAMOND)
+                    && infusion.getResultItem(server.registryAccess()).getCount() == 4 && infusion.getIngredients().get(0).test(new ItemStack(Items.IRON_INGOT)),
+                    "Schema builder and semantic replacements must reach a custom non-crafting serializer");
+        }
+
+        private void verifyGameplay() {
+            var level = helper.getLevel();
+            var zombie = EntityType.ZOMBIE.create(level);
+            var cow = EntityType.COW.create(level);
+            int hurtCount = MantisTestExtension.marks("hurt");
+            LivingHurtEvent skipped = new LivingHurtEvent(cow, level.damageSources().generic(), 5);
+            MinecraftForge.EVENT_BUS.post(skipped);
+            helper.assertTrue(skipped.getAmount() == 5 && MantisTestExtension.marks("hurt") == hurtCount, "Entity filter must skip other entity types");
+            LivingHurtEvent changed = new LivingHurtEvent(zombie, level.damageSources().generic(), 5);
+            MinecraftForge.EVENT_BUS.post(changed);
+            helper.assertTrue(changed.getAmount() == 2 && MantisTestExtension.marks("hurt") == hurtCount + 1
+                    && zombie.getPersistentData().getCompound("mantis").getString("hurt").equals("yes"), "Script must change damage and persistent entity data synchronously");
+            var player = FakePlayerFactory.getMinecraft(level);
+            BlockPos pos = helper.absolutePos(new BlockPos(2, 1, 2));
+            player.setPos(pos.getX(), pos.getY(), pos.getZ());
+            level.setBlockAndUpdate(pos, Blocks.STONE.defaultBlockState());
+            int before = MantisTestExtension.marks("block");
+            BlockEvent.BreakEvent event = new BlockEvent.BreakEvent(level, pos, level.getBlockState(pos), player);
+            MinecraftForge.EVENT_BUS.post(event);
+            helper.assertTrue(event.isCanceled() && MantisTestExtension.marks("block") == before + 1
+                    && player.getPersistentData().getCompound("mantis").getString("block").equals("yes"), "Script must cancel a matching block event and use player helpers");
+            helper.assertTrue(player.getInventory().countItem(ForgeRegistries.ITEMS.getValue(new ResourceLocation("mantis:script_item"))) >= 3, "Player give must reach the inventory");
+            BlockEvent.BreakEvent second = new BlockEvent.BreakEvent(level, pos, level.getBlockState(pos), player);
+            MinecraftForge.EVENT_BUS.post(second);
+            helper.assertTrue(!second.isCanceled() && MantisTestExtension.marks("block") == before + 1, "Filtered once listener must unsubscribe after its first matching event");
+            int crafted = MantisTestExtension.marks("craft");
+            MinecraftForge.EVENT_BUS.post(new PlayerEvent.ItemCraftedEvent(player, new ItemStack(ForgeRegistries.ITEMS.getValue(new ResourceLocation("mantis:script_item")), 2), player.getInventory()));
+            helper.assertTrue(MantisTestExtension.marks("craft") == crafted + 1, "Crafted event must export item stacks correctly");
+            level.setBlockAndUpdate(pos, Blocks.AIR.defaultBlockState());
         }
 
         private void write(String text) {
