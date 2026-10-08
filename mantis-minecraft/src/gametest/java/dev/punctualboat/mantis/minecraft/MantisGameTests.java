@@ -211,9 +211,21 @@ public final class MantisGameTests {
                 helper.assertTrue(reload.isCompletedExceptionally(), "Script commands must not overwrite existing roots");
                 helper.assertTrue(server.getCommands().getDispatcher() == oldDispatcher && command("mantis:sum 2") == 2, "Command collision must retain previous commands");
                 helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 1 && MantisTestExtension.activeFutures() == 1, "Rejected command generation must release its owned work");
-                write(original.replace("commands.register('mantis:obsolete', {permission:2}, () => 3);", ""));
-                reload = server.reloadResources(server.getPackRepository().getSelectedIds()); stage = 3;
-                helper.assertTrue(false, "Waiting for successful reload");
+                if (net.minecraftforge.fml.ModList.get().isLoaded("create")) {
+                    write(original + "\nevents.on('recipes', () => recipes.custom('mantis:create_invalid', {type:'create:mixing',ingredients:'invalid',results:[]}));\n");
+                    reload = server.reloadResources(server.getPackRepository().getSelectedIds()); stage = 5;
+                    helper.assertTrue(false, "Waiting for invalid Create recipe reload");
+                }
+                startSuccessfulReload();
+            }
+            if (stage == 5) {
+                helper.assertTrue(reload.isDone(), "Waiting for invalid Create recipe reload");
+                helper.assertTrue(reload.isCompletedExceptionally(), "The installed Create serializer must reject malformed recipes");
+                verifyRecipe();
+                helper.assertTrue(server.getCommands().getDispatcher() == oldDispatcher && command("mantis:sum 2") == 2
+                        && ClockData.get(server).clock().scheduledTasks() == 1 && MantisTestExtension.activeFutures() == 1,
+                        "Invalid Create recipe reload must preserve old commands, recipes and owned work");
+                startSuccessfulReload();
             }
             if (stage == 3) {
                 helper.assertTrue(reload.isDone(), "Waiting for successful reload");
@@ -233,6 +245,12 @@ public final class MantisGameTests {
                 helper.assertTrue(saved.getCompound("cooldowns").getLong("mantis:smoke") > clock.ticks(), "World data must save cooldown deadlines");
                 stage = 4;
             }
+        }
+
+        private void startSuccessfulReload() {
+            write(original.replace("commands.register('mantis:obsolete', {permission:2}, () => 3);", ""));
+            reload = server.reloadResources(server.getPackRepository().getSelectedIds()); stage = 3;
+            helper.assertTrue(false, "Waiting for successful reload");
         }
 
         private int command(String text) {
@@ -362,6 +380,7 @@ public final class MantisGameTests {
             helper.assertTrue(helper.getLevel().getFluidState(fluidPos).getType() == fluid && bucket.getMaxStackSize() == 1
                     && bucket.getCraftingRemainingItem(new ItemStack(bucket)).is(Items.BUCKET), "Fluid must place in a world and retain its empty bucket remainder");
             var liquidBlock = (net.minecraft.world.level.block.LiquidBlock) ForgeRegistries.BLOCKS.getValue(new ResourceLocation("mantis:script_sap"));
+            helper.assertTrue(liquidBlock.getExplosionResistance() == 12 && liquidBlock.defaultBlockState().getLightEmission() == 4, "Liquid block must retain the declared resistance and light");
             helper.assertTrue(liquidBlock.pickupBlock(helper.getLevel(), fluidPos, helper.getLevel().getBlockState(fluidPos)).is(bucket), "Placed fluid must be collectable in its own bucket");
             var tab = BuiltInRegistries.CREATIVE_MODE_TAB.get(new ResourceLocation("mantis:script_tab"));
             tab.buildContents(new CreativeModeTab.ItemDisplayParameters(FeatureFlags.DEFAULT_FLAGS, true, server.registryAccess()));

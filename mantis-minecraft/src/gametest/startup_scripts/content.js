@@ -6,7 +6,7 @@ registries.item('mantis:script_item', { maxStackSize: 16, fireResistant: true, t
 registries.item('mantis:script_food', { food: { nutrition: 3, saturation: 0.5, alwaysEat: true } });
 registries.block('mantis:script_block', { hardness: 2, resistance: 5, light: 7 });
 const sap = registries.fluid('mantis:script_sap', { displayName: 'Script Sap', density: 1200, viscosity: 1500, temperature: 310,
-  light: 4, tickRate: 8, tint: '#CC88BB44', canConvertToSource: true });
+  light: 4, tickRate: 8, resistance: 12, tint: '#CC88BB44', canConvertToSource: true });
 data.tag('fluids', 'mantis:script_sap', [sap.source, sap.flowing]);
 registries.creativeTab('mantis:script_tab', {displayName:'Script Tab', icon:sap.bucket,
   items:['mantis:script_item','mantis:script_block',sap.bucket], after:['minecraft:ingredients']});

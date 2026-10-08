@@ -66,7 +66,8 @@ final class StartupFluid {
         source = new ForgeFlowingFluid.Source(flowProperties);
         flowing = new ForgeFlowingFluid.Flowing(flowProperties);
         int light = StartupRegistries.integer(properties, "light", 0, 0, 15);
-        block = new LiquidBlock(() -> source, BlockBehaviour.Properties.of().noCollission().strength(100).noLootTable().liquid().lightLevel(state -> light));
+        float resistance = StartupRegistries.number(properties, "resistance", 100, 0, 100000);
+        block = new LiquidBlock(() -> source, BlockBehaviour.Properties.of().noCollission().strength(100, resistance).noLootTable().liquid().lightLevel(state -> light));
         bucket = new BucketItem(() -> source, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1));
     }
 }

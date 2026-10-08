@@ -6,10 +6,10 @@ import java.util.function.*;
 
 /** A callback owned by one generation, for host APIs that need a return value. */
 public final class ScriptCallback implements AutoCloseable {
-    private final Supplier<MantisContext> context;
-    private final Function<Object, Object> export;
-    private final Consumer<Throwable> errors;
-    private final Runnable closed;
+    private Supplier<MantisContext> context;
+    private Function<Object, Object> export;
+    private Consumer<Throwable> errors;
+    private Runnable closed;
     private Value callback;
     private int failures;
 
@@ -24,20 +24,26 @@ public final class ScriptCallback implements AutoCloseable {
     public <T> T callValidated(Function<Value, T> validate, Object... arguments) {
         if (!active()) throw new IllegalStateException("Callback generation is closed or callback is disabled");
         MantisContext owner = context.get();
+        Value callable = callback;
+        Function<Object, Object> convert = export;
+        Consumer<Throwable> report = errors;
         try {
             T result = owner.access("host-callback", () -> {
                 Object[] values = new Object[arguments.length];
-                for (int i = 0; i < values.length; i++) values[i] = export.apply(arguments[i]);
-                return validate.apply(owner.invoke(callback, values));
+                for (int i = 0; i < values.length; i++) values[i] = convert.apply(arguments[i]);
+                if (!active()) throw new IllegalStateException("Callback was closed while converting arguments");
+                return validate.apply(owner.invoke(callable, values));
             });
             failures = 0; return result;
         } catch (RuntimeException error) {
             if (++failures >= EventBus.DEFAULT_MAX_FAILURES || owner.isClosed()) close();
-            errors.accept(error); throw error;
+            report.accept(error); throw error;
         }
     }
     @Override public void close() {
         if (callback == null) return;
-        callback = null; closed.run();
+        Runnable cleanup = closed;
+        callback = null; context = null; export = null; errors = null; closed = null;
+        cleanup.run();
     }
 }
