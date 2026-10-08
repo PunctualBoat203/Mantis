@@ -93,7 +93,7 @@ public final class RecipesApi {
         private RecipeBuilder(String id, RecipeTransaction origin) { this.id = id; this.origin = origin; }
         private RecipeTransaction edit() {
             if (active() != origin) throw new IllegalStateException("Recipe builders expire when their recipe event ends");
-            if (origin.get(id) == null) throw new IllegalStateException("Recipe was removed: " + id);
+            origin.get(id);
             return origin;
         }
         @MantisExport public String id() { return id; }

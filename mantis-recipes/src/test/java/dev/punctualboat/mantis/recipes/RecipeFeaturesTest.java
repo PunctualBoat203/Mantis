@@ -7,6 +7,42 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RecipeFeaturesTest {
+    @Test void buildersCannotCrossRecipeEvents() {
+        try (MantisEngine engine = new MantisEngine()) {
+            MantisContext[] ref = new MantisContext[1]; RecipesApi api = new RecipesApi(() -> ref[0]);
+            ref[0] = engine.createContext(Map.of("builder.js", "import {recipes as r} from 'test:recipes';let old;export const build=()=>{old=r.shapeless('test:one','stick',['stone'])};export const mutate=()=>old.group('wrong');"), Map.of("test:recipes", Map.of("recipes", api)));
+            var module = ref[0].evaluateModule("builder.js");
+            api.begin(new RecipeTransaction(Map.of())); ref[0].invokeLoad(module.getMember("build")); api.end();
+            assertThrows(ScriptException.class, () -> ref[0].invoke(module.getMember("mutate")));
+            var next = new RecipeTransaction(Map.of("test:one", json("{\"type\":\"minecraft:crafting_shapeless\",\"ingredients\":[{\"item\":\"minecraft:dirt\"}],\"result\":{\"item\":\"minecraft:stick\"}}")));
+            api.begin(next); assertThrows(ScriptException.class, () -> ref[0].invoke(module.getMember("mutate"))); api.end();
+            assertTrue(next.changedIds().isEmpty());
+        }
+    }
+    @Test void nativeJsonPreservesLargeIntegerFieldsAndRejectsOversizedWrites() {
+        try (MantisEngine engine = new MantisEngine()) {
+            var context = engine.createContext(Map.of(), Map.of());
+            JsonObject input = json("{\"energy\":9223372036854775807,\"fraction\":0.5,\"negative\":-9007199254740992}");
+            var value = JsonCodec.write(context, input);
+            assertEquals(input, JsonCodec.read(value));
+            assertTrue(context.invoke(context.evaluate("type", "value => typeof value.energy === 'bigint' && typeof value.negative === 'bigint' && typeof value.fraction === 'number'"), value).asBoolean());
+            JsonArray huge = new JsonArray(); for (int i = 0; i < 100_001; i++) huge.add(0);
+            assertThrows(IllegalArgumentException.class, () -> JsonCodec.write(context, huge));
+        }
+    }
+
+    @Test void invalidSchemaPathsAndFluidReplacementsLeaveRecipesUnchanged() {
+        var schemas = new RecipeSchemas();
+        assertThrows(IllegalArgumentException.class, () -> schemas.register("test:overlap", json("{\"fields\":{\"a\":{\"kind\":\"json\",\"path\":\"/result\"},\"b\":{\"kind\":\"json\",\"path\":\"/result/item\"}}}")));
+        assertThrows(IllegalArgumentException.class, () -> schemas.register("test:escape", json("{\"fields\":{\"a\":{\"kind\":\"json\",\"path\":\"/bad~x\"}}}")));
+        assertThrows(IllegalArgumentException.class, () -> schemas.register("test:type", json("{\"fields\":{\"a\":{\"kind\":\"json\",\"path\":\"/type/child\"}}}")));
+        assertTrue(schemas.types().isEmpty());
+        var tx = new RecipeTransaction(Map.of("test:fluid", json("{\"type\":\"test:machine\",\"input\":{\"fluid\":\"minecraft:water\",\"amount\":1000,\"chance\":0.25}}")));
+        assertThrows(IllegalArgumentException.class, () -> tx.replaceValues(new RecipeFilter(null,null,null), json("{\"fluid\":\"water\"}"), json("{\"fluid\":\"lava\",\"amount\":-1}"), "input"));
+        assertTrue(tx.changedIds().isEmpty());
+        assertEquals(1, tx.replaceValues(new RecipeFilter(null,null,null), json("{\"fluid\":\"water\"}"), json("{\"fluid\":\"lava\",\"amount\":2000}"), "input"));
+        assertEquals(json("{\"fluid\":\"minecraft:lava\",\"amount\":2000,\"chance\":0.25}"), tx.get("test:fluid").get("input"));
+    }
     private static JsonObject json(String value) { return JsonParser.parseString(value).getAsJsonObject(); }
     @Test void semanticFiltersUseRolesTagsAndBooleanCombinations() {
         RecipeSchemas schemas = new RecipeSchemas();

@@ -25,6 +25,10 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.server.packs.*;
+import net.minecraft.server.packs.metadata.pack.PackMetadataSection;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,6 +38,45 @@ import java.util.concurrent.CompletableFuture;
 @GameTestHolder("mantis")
 @PrefixGameTestTemplate(false)
 public final class MantisGameTests {
+    @GameTest(templateNamespace = "mantis", template = "empty")
+    public static void generatedResourcesValidateAndFreeze(GameTestHelper helper) {
+        StartupData data = new StartupData(); StartupRegistries registry = new StartupRegistries(data);
+        try (var context = Mantis.engine().createContext(Map.of(), Map.of())) {
+            registry.item("mantis:inspection", context.evaluate("item-properties", "({texture:'minecraft:item/emerald',displayName:'Inspection Item'})"));
+            registry.block("mantis:inspection_block", context.evaluate("block-properties", "({displayName:'Inspection Block'})"));
+            data.json("mantis:recipes/inspection.json", context.evaluate("data-json", "({type:'minecraft:crafting_special_repairitem'})"));
+            data.tag("items", "mantis:inspection", context.evaluate("tag-values", "['minecraft:stone']"));
+            data.tag("items", "mantis:inspection", context.evaluate("tag-values-append", "[{id:'missing:optional',required:false}]"));
+            boolean rejected = false;
+            try { registry.item("mantis:bad", context.evaluate("bad-item", "({maxStackSize:0})")); }
+            catch (IllegalArgumentException expected) { rejected = true; }
+            helper.assertTrue(rejected, "Invalid item declaration must fail");
+            rejected = false;
+            try { data.json("mantis:../escape.json", context.evaluate("bad-path", "({})")); }
+            catch (IllegalArgumentException expected) { rejected = true; }
+            helper.assertTrue(rejected, "Generated resources must reject parent path segments");
+            data.freeze(); registry.freeze();
+            try (PackResources server = data.open("test-server", PackType.SERVER_DATA); PackResources assets = data.open("test-assets", PackType.CLIENT_RESOURCES)) {
+                helper.assertTrue(server.getMetadataSection(PackMetadataSection.SERIALIZER) != null && assets.getMetadataSection(PackMetadataSection.SERIALIZER) != null, "Generated packs must expose valid pack metadata");
+                JsonObject item = read(assets, PackType.CLIENT_RESOURCES, "mantis:models/item/inspection.json");
+                helper.assertTrue(item.getAsJsonObject("textures").get("layer0").getAsString().equals("minecraft:item/emerald"), "Generated item model must use the declared texture");
+                helper.assertTrue(read(assets, PackType.CLIENT_RESOURCES, "mantis:blockstates/inspection_block.json").getAsJsonObject("variants").has(""), "Generated cube block must have a blockstate");
+                helper.assertTrue(read(assets, PackType.CLIENT_RESOURCES, "mantis:lang/en_us.json").get("item.mantis.inspection").getAsString().equals("Inspection Item"), "Generated item names must be preserved alongside block names");
+                helper.assertTrue(read(server, PackType.SERVER_DATA, "mantis:tags/items/inspection.json").getAsJsonArray("values").size() == 2, "Repeated tag declarations must append values");
+                helper.assertTrue(server.getResource(PackType.CLIENT_RESOURCES, new ResourceLocation("mantis:models/item/inspection.json")) == null, "Server data pack must not expose client resources");
+                List<ResourceLocation> listed = new ArrayList<>(); assets.listResources(PackType.CLIENT_RESOURCES, "mantis", "models/item", (id, value) -> listed.add(id));
+                helper.assertTrue(listed.size() == 2, "Pack listing must include both item models under the requested path");
+            }
+            rejected = false;
+            try { data.tag("items", "mantis:late", context.evaluate("late", "[]")); }
+            catch (IllegalStateException expected) { rejected = true; }
+            helper.assertTrue(rejected, "Generated resources must be immutable after startup");
+        } catch (IOException error) { throw new IllegalStateException(error); }
+        helper.succeed();
+    }
+    private static JsonObject read(PackResources pack, PackType type, String id) throws IOException {
+        try (var input = pack.getResource(type, new ResourceLocation(id)).get(); var reader = new InputStreamReader(input, StandardCharsets.UTF_8)) { return JsonParser.parseReader(reader).getAsJsonObject(); }
+    }
     @GameTest(templateNamespace = "mantis", template = "empty", timeoutTicks = 600)
     public static void scriptedRecipesClockAndReload(GameTestHelper helper) {
         MinecraftServer server = helper.getLevel().getServer();
@@ -206,6 +249,9 @@ public final class MantisGameTests {
             helper.assertTrue(event.isCanceled() && MantisTestExtension.marks("block") == before + 1
                     && player.getPersistentData().getCompound("mantis").getString("block").equals("yes"), "Script must cancel a matching block event and use player helpers");
             helper.assertTrue(player.getInventory().countItem(ForgeRegistries.ITEMS.getValue(new ResourceLocation("mantis:script_item"))) >= 3, "Player give must reach the inventory");
+            var replacement = new net.minecraftforge.common.util.FakePlayer(level, new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "MantisClone"));
+            MinecraftForge.EVENT_BUS.post(new PlayerEvent.Clone(replacement, player, true));
+            helper.assertTrue(replacement.getPersistentData().getCompound("mantis").getString("block").equals("yes"), "Mantis player data must survive player cloning after death");
             BlockEvent.BreakEvent second = new BlockEvent.BreakEvent(level, pos, level.getBlockState(pos), player);
             MinecraftForge.EVENT_BUS.post(second);
             helper.assertTrue(!second.isCanceled() && MantisTestExtension.marks("block") == before + 1, "Filtered once listener must unsubscribe after its first matching event");

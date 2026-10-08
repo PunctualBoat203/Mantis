@@ -41,9 +41,9 @@ events.on('recipes', () => {
   });
   recipes.replaceInput({ id: 'mantis:built_infusion' }, '#mantis:script_inputs', 'iron_ingot');
   recipes.replaceOutput({ id: 'mantis:built_infusion' }, 'emerald', 'diamond');
-  recipes.set({ type: 'mantis:test_infusion' }, '/fusion/energy', 32000);
+  recipes.set({ type: 'mantis:test_infusion', not: { id: 'mantis:built_infusion' } }, '/fusion/energy', 32000);
   recipes.set({ id: 'mantis:infusion' }, '/outputs/0/count', 2);
-  recipes.patch({ type: 'mantis:test_infusion' }, json => {
+  recipes.patch({ type: 'mantis:test_infusion', not: { id: 'mantis:built_infusion' } }, json => {
     json.ritual.duration = 400;
     return json;
   });

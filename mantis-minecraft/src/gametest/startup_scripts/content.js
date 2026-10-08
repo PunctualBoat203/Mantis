@@ -2,7 +2,7 @@ import { registries } from 'minecraft:registries';
 import { schemas } from 'minecraft:schemas';
 import { data } from 'minecraft:data';
 
-registries.item('mantis:script_item', { maxStackSize: 16, fireResistant: true });
+registries.item('mantis:script_item', { maxStackSize: 16, fireResistant: true, texture: 'minecraft:item/emerald', displayName: 'Script Item' });
 registries.item('mantis:script_food', { food: { nutrition: 3, saturation: 0.5, alwaysEat: true } });
 registries.block('mantis:script_block', { hardness: 2, resistance: 5, light: 7 });
 data.tag('items', 'mantis:script_inputs', ['mantis:script_item', 'minecraft:stone']);

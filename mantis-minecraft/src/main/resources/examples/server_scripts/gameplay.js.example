@@ -1,0 +1,10 @@
+import { events } from 'mantis:events';
+
+events.on('block.broken', { block: 'minecraft:diamond_block' }, event => {
+  event.control.cancel();
+  event.player.tell('This block is protected.');
+});
+events.on('item.crafted', { item: 'minecraft:diamond_sword' }, event => {
+  event.player.data('lastCraft', event.stack.id());
+  event.player.tell('Crafted ' + event.stack.count() + ' diamond sword.');
+});

@@ -16,6 +16,8 @@ public final class StartupRegistries {
     private final Map<ResourceLocation, JsonObject> items = new LinkedHashMap<>(), blocks = new LinkedHashMap<>();
     private final Map<ResourceLocation, Block> registeredBlocks = new LinkedHashMap<>();
     private boolean frozen;
+    private final StartupData data;
+    public StartupRegistries(StartupData data) { this.data = Objects.requireNonNull(data); }
     public void freeze() { frozen = true; }
     private ResourceLocation declare(String id) {
         if (frozen) throw new IllegalStateException("Registry declarations are only available during startup loading");
@@ -29,20 +31,25 @@ public final class StartupRegistries {
         if (!json.isJsonObject()) throw new IllegalArgumentException("Registry properties must be an object");
         JsonObject result = json.getAsJsonObject();
         for (String key : result.keySet()) if (!allowed.contains(key)) throw new IllegalArgumentException("Unknown registry property: " + key);
+        for (String key : List.of("texture", "displayName")) if (result.has(key) && (!result.get(key).isJsonPrimitive() || !result.getAsJsonPrimitive(key).isString()))
+            throw new IllegalArgumentException(key + " must be a string");
+        if (result.has("displayName") && (result.get("displayName").getAsString().isBlank() || result.get("displayName").getAsString().length() > 256)) throw new IllegalArgumentException("displayName must contain 1-256 characters");
         return result;
     }
     @MantisExport public void item(String id, Value properties) {
         ResourceLocation key = declare(id);
-        JsonObject json = properties(properties, Set.of("maxStackSize", "durability", "fireResistant", "food"));
+        JsonObject json = properties(properties, Set.of("maxStackSize", "durability", "fireResistant", "food", "texture", "displayName"));
         itemProperties(json);
         if (items.containsKey(key) || blocks.containsKey(key) && bool(blocks.get(key), "item", true)) throw new IllegalArgumentException("Duplicate item: " + id);
+        data.contentAssets(key, json, false, false);
         items.put(key, json.deepCopy());
     }
     @MantisExport public void block(String id, Value properties) {
         ResourceLocation key = declare(id);
-        JsonObject json = properties(properties, Set.of("hardness", "resistance", "light", "noOcclusion", "requiresTool", "item"));
+        JsonObject json = properties(properties, Set.of("hardness", "resistance", "light", "noOcclusion", "requiresTool", "item", "texture", "displayName"));
         blockProperties(json);
         if (blocks.containsKey(key) || bool(json, "item", true) && items.containsKey(key)) throw new IllegalArgumentException("Duplicate block or block item: " + id);
+        data.contentAssets(key, json, true, bool(json, "item", true));
         blocks.put(key, json.deepCopy());
     }
     private static boolean bool(JsonObject p, String key, boolean fallback) {

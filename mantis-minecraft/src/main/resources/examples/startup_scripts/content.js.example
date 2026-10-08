@@ -1,0 +1,14 @@
+import { registries } from 'minecraft:registries';
+import { data } from 'minecraft:data';
+
+registries.item('pack:token', {
+  displayName: 'Pack Token', texture: 'minecraft:item/emerald', maxStackSize: 16
+});
+registries.block('pack:stone', {
+  displayName: 'Pack Stone', texture: 'minecraft:block/stone', hardness: 2, resistance: 6
+});
+data.tag('items', 'pack:tokens', ['pack:token']);
+data.lootTable('pack:chests/token', {
+  type: 'minecraft:chest',
+  pools: [{ rolls: 1, entries: [{ type: 'minecraft:item', name: 'pack:token' }] }]
+});

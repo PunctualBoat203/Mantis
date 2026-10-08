@@ -4,7 +4,7 @@ Minecraft 1.20.1 scripting by **PunctualBoat**. Java 17, Forge 47.4.0 or newer i
 
 Mantis owns script loading, modules, events, reload cleanup, Java bindings, type conversion, async scheduling, an internal clock, and recipe edits. It uses bundled GraalJS 23.0.12 for JavaScript execution. The mod has no Rhino, KubeJS, or HeroClock dependency. Comparative benchmarks live in a separate development module; performance depends on the workload and JVM.
 
-Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.2.2.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`.
+Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.3.0.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`.
 
 On first launch Mantis creates:
 
@@ -18,7 +18,7 @@ config/mantis/
     server_scripts/
 ```
 
-Startup scripts run once at `FMLLoadCompleteEvent` and require a game restart to change. They currently provide initialization hooks; registering new items, blocks, or fluids is not implemented. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
+Startup scripts run once before Forge fills its registries and require a game restart to change. They declare items, blocks, recipe schemas, generated tags/loot, and JSON assets. Registry declarations must match between clients and servers. Startup errors fail mod loading; the lenient first-load fallback applies only to server scripts. Fluid registration is still pending. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
 
 ## Scripts
 
@@ -53,7 +53,7 @@ events.on('recipes', () => {
 
 ## Recipe API
 
-Edits run inside the `recipes` event, before registered serializers load JSON. Filters combine exact `id`, serializer `type`, and recipe namespace `mod`. An empty filter matches every recipe; unknown filter keys produce an error.
+Edits run inside the `recipes` event, before registered serializers load JSON. Filters combine exact `id`, serializer `type`, recipe namespace `mod`, and semantic `input`/`output` selectors. Item selectors are IDs, tags use `#namespace:path`, and fluid selectors use `{fluid: "namespace:path"}`. `any: [filters]`, `all: [filters]`, and `not: filter` compose filters; other fields on the same filter still apply. An empty filter matches every recipe; unknown filter keys produce an error. Item/tag membership comes from the current reload, including newly generated tags.
 
 | Operation | Behavior |
 | --- | --- |
@@ -63,28 +63,115 @@ Edits run inside the `recipes` event, before registered serializers load JSON. F
 | `recipes.get(id)` | Read a detached JSON copy |
 | `recipes.ids(filter)` | List matching IDs in order |
 | `recipes.set(filter, '/path/to/field', value)` | Set an exact JSON field, including array indices |
-| `recipes.patch(filter, (json, id) => json)` | Transform complete JSON copies and return the count |
+| `recipes.patch(filter, (json, id) => json)` | Transform native JS copies and return the count |
+| `recipes.count(filter)` / `contains(filter)` | Count matches / test whether any match exists |
+| `recipes.replaceInput(filter, from, to)` / `replaceOutput(...)` | Replace values in input/output fields and return the number of changed recipes |
+| `recipes.item(id, count = 1)` / `tag(id)` / `fluid(id, amount)` | Create normalized item, tag, or fluid JSON |
+| `recipes.ingredient(value)` | Normalize an item, tag, alternatives, or custom ingredient |
+| `recipes.schema(type, definition)` / `types()` | Register a schema for this generation / list available schemas |
+| `recipes.create(id, type, fields)` | Build through a registered schema |
 
-The same API handles crafting, cooking, smithing, machine, fusion, and ritual JSON **when that mod uses Minecraft's RecipeManager and registered recipe serializers**. Its own serializer determines the accepted schema. Forge conditions and all unedited fields are preserved. A ritual activation item, fluid amount, energy cost, catalyst, or output can be changed through its JSON path without assuming it is a crafting-table recipe. Use `get` to inspect the installed recipe's actual structure.
+The same API handles crafting, cooking, smithing, machine, fusion, and ritual JSON **when that mod uses Minecraft's RecipeManager and registered recipe serializers**. Its own serializer determines the accepted schema. Forge conditions and all unedited fields are preserved. A ritual activation item, fluid amount, energy cost, catalyst, or output can be changed through its JSON path without assuming it is a crafting-table recipe. Use `get` to inspect the installed recipe's actual structure. Schemas mark input/output paths for semantic filters; unknown serializers use common field names. Register a schema for unusual field names. `set` and `patch` work on arbitrary paths regardless of a schema. Replacements preserve count and opaque metadata when the target is an object; an explicit replacement count overrides it. A matching tag is replaced as a whole ingredient. String outputs cannot represent a multi-item stack; use `set` for serializers that keep count in a separate field. Integer JSON fields outside JavaScript's safe range become BigInt in native copies, preserving large energy values.
 
 Mods that keep recipes in separate private storage require an integration through the extension API. Generic JSON support does not establish compatibility with every mod/version. Actual Draconic Evolution and Occultism installations have not yet been tested.
 
 Script edits are staged copy-on-write: only recipes that an edit touches are copied, and unchanged recipes are shared with the loaded data. Changed recipes are validated by their installed serializers before the original JSON map changes. Script errors reject the new generation. A successful `/reload` or `/mantis reload` replaces the server scripts and cleans up previous listeners and timers. On failure, the previous generation stays active. The one exception is the very first load, when there is no previous generation to keep: by default (`lenient_first_load=true`) Mantis logs the error, applies no scripted recipe changes, and lets the server finish starting instead of aborting the datapack load. Fix the script and run `/mantis reload`. Set `lenient_first_load=false` to make a first-load failure fatal. External side effects performed by an extension during script evaluation cannot be rolled back automatically.
 
+## Recipe builders and schemas
+
+Vanilla helpers take an explicit recipe ID: `shapeless(id, output, ingredients)`, `shaped(id, output, pattern, key)`, `smelting` / `blasting` / `smoking` / `campfire(id, output, ingredient)`, `stonecutting(id, output, ingredient)`, and `smithing(id, output, template, base, addition)`. Cooking returns a builder with `experience(value)` and `cookingTime(ticks)`; builders also support `group(name)`, `set(pointer, value)`, and `id()`. Mutation handles expire at the end of their recipe event. Cooking outputs contain one item; stonecutting supports counted output.
+
+```js
+events.on('recipes', () => {
+  recipes.shaped('pack:sticks', recipes.item('minecraft:stick', 4),
+    ['P', 'P'], {P: '#minecraft:planks'});
+  recipes.smelting('pack:recycle', 'minecraft:iron_nugget', 'minecraft:iron_sword')
+    .experience(0.2).cookingTime(100);
+});
+```
+
+A schema targets an installed serializer and declares fields as `{kind, path, role?, optional?, default?}`. `path` is a JSON pointer through object fields; overlapping paths and `/type` edits are rejected. `template` preserves constant serializer metadata. Built-in kinds are `json`, `ingredient`, `ingredients`, `item`, `items`, `fluid`, `positive_int`, `number`, and `string`. `role: 'input'` / `'output'` controls semantic matching. Java extensions can add component converters and schemas through `MantisApi.registerRecipeComponent` / `registerRecipeSchema`. Server `recipes.schema` declarations belong to that generation; startup `schemas.register` declarations are copied into each generation.
+
+```js
+// The serializer must exist and accept this JSON layout.
+events.on('recipes', () => {
+  recipes.schema('example:machine', {
+    fields: {
+      feed: {kind: 'ingredient', path: '/processing/feed', role: 'input'},
+      product: {kind: 'item', path: '/processing/product', role: 'output'},
+      energy: {kind: 'positive_int', path: '/energy', default: 1000}
+    }
+  });
+  recipes.create('pack:machine_recipe', 'example:machine', {
+    feed: '#forge:ingots/iron', product: recipes.item('minecraft:diamond', 2)
+  });
+});
+```
+
+## Startup content and generated resources
+
+```js
+import { registries } from 'minecraft:registries';
+import { data } from 'minecraft:data';
+
+registries.item('pack:token', {
+  displayName: 'Pack Token', texture: 'minecraft:item/emerald', maxStackSize: 16
+});
+registries.block('pack:stone', {
+  displayName: 'Pack Stone', texture: 'minecraft:block/stone', hardness: 2, resistance: 6
+});
+data.tag('items', 'pack:tokens', ['pack:token']);
+data.lootTable('pack:chests/token', {
+  type: 'minecraft:chest',
+  pools: [{rolls: 1, entries: [{type: 'minecraft:item', name: 'pack:token'}]}]
+});
+```
+
+Item properties are `maxStackSize`, `durability`, `fireResistant`, `food: {nutrition, saturation, alwaysEat}`, `texture`, and `displayName`. Durable items stack to one. Block properties are `hardness`, `resistance`, `light`, `noOcclusion`, `requiresTool`, `item` (automatic block item, default true), `texture`, and `displayName`. Unknown properties and duplicate IDs fail. Use a custom namespace for new entries. Items get generated models using their texture; blocks get cube models, blockstates and optional block-item models. Default textures are paper/stone. `displayName` creates English translations. New creative tabs and block/item behavioral subclasses are not yet provided.
+
+Generated resources are in-memory packs. `data.tag` accepts a relative tag folder (`items`, `blocks`, `fluids`, `entity_types`, `game_events`, or e.g. `worldgen/biome`), a tag ID, and values consisting of IDs, `#tag` references, or `{id, required}` entries. Repeated declarations append; `replace: true` replaces earlier values and lower-priority pack values. `data.lootTable` writes a complete loot table. `data.json('pack:relative/path.json', object)` supplies other server JSON, including predicates, advancements or mod data, subject to that loader's schema. `data.assetJson` supplies or overrides client JSON such as models and translations. Textures must already exist in Minecraft or an installed resource pack/mod. Data and assets are limited to 4096 resources total, 1 MiB per resource and 16 MiB total.
+
+Startup resources are frozen and reused during `/reload`; changing them requires a restart. Their installed loaders validate the JSON. The generated packs default to the top position; operator pack ordering can affect overriding. Runtime loot-drop modifiers and server-script tag generation are still pending.
+
 ## Modules and events
 
 | Module | Exports |
 | --- | --- |
-| `mantis:events` | `events.on(name, callback)`, `events.once(name, callback)`; returned handles have `unsubscribe()` |
+| `mantis:events` | `events.on(name, callback)`, `once(name, callback)`, or either with `(name, filter, callback)`; handles have `unsubscribe()` |
 | `mantis:console` | `console.log`, `warn`, `error` |
 | `mantis:lifecycle` | `lifecycle.on(hook, callback)`, `lifecycle.state()` |
 | `mantis:rhino` | Explicit migration helpers: `Java.type`, `Java.to`, `Java.from` |
 | `mantis:clock` | `clock.ticks`, `after`, `every`, `cooldown`, `remaining`; timer handles have `cancel()` and `active()` |
 | `minecraft:recipes` | `recipes` |
 | `minecraft:mods` | `mods.isLoaded(modId)` |
-| `minecraft:server` | `server.broadcast(message)`, `server.runCommand(command)` |
+| `minecraft:server` | `server.broadcast(message)`, `runCommand(command)`, `players()`, `level(dimension)` |
+| `minecraft:registries` | Startup-only `registries.item(id, properties)` / `block(id, properties)` |
+| `minecraft:schemas` | Startup-only `schemas.register(type, definition)` |
+| `minecraft:data` | Startup-only `data.tag(folder, id, values, replace = false)`, `lootTable(id, json)`, `json(path, json)`, `assetJson(path, json)` |
 
-Server events are `recipes`, `server.started`, `server.reloaded`, `server.tick`, `server.stopping`, `player.logged_in`, and `player.logged_out`. Tick/lifecycle payloads carry `ticks` where available. Player payloads carry `player.uuid()`, `player.name()`, and `player.tell(message)`. Startup scripts receive `startup` and server lifecycle/player events; clock, recipes, and server-command modules are server-script APIs.
+Server events include `recipes`, `server.started`, `server.reloaded`, `server.tick`, `server.stopping`, `player.logged_in`, and `player.logged_out`. Tick/lifecycle payloads carry `ticks` where available. Startup scripts receive `startup` and later gameplay/lifecycle events; they have no clock or recipe-edit module. Server operations require a running server on its main thread.
+
+| Event group | Names and payload additions |
+| --- | --- |
+| Players | `player.chat` (`message`), `player.respawned`, `player.changed_dimension` (`from`, `to`), `player.tick` |
+| Items | `item.crafted`, `item.smelted`, `item.picked_up`, `item.dropped`, `item.used`, `item.right_clicked` (`item`, `stack`) |
+| Blocks | `block.right_clicked`, `block.left_clicked`, `block.broken`, `block.placed` (`block`, `position`, `level`) |
+| Entities | `entity.spawned`, `entity.death` (`source`), `entity.hurt` (`damage`, `source`) |
+| Levels | `level.loaded`, `level.unloaded`, `level.tick`, `level.before_explosion`, `level.after_explosion` (affected `blocks` / `entities` counts) |
+
+Gameplay entity payloads carry `entity`, `entityType`, `dimension`, and `player` when applicable. Level payloads carry `level` and `dimension`. Filtered subscriptions accept exact `item`, `block`, `entityType`, and `dimension` strings, checked in Java before payload conversion or entering JavaScript. Multiple fields combine with AND. Filters are captured at registration; skipped events do not consume a `once` listener.
+
+Every gameplay payload has `control.cancellable()`, `cancelled()`, and `cancel()`; `cancel()` requires a cancellable Forge event. `entity.hurt` also allows `control.damage(amount)`. Controls expire when synchronous event dispatch ends. Read current damage from the initial payload; another listener may have changed the underlying Forge event. Default Forge dispatch skips already cancelled events. Lifecycle/login/logout payloads have no control.
+
+`player` supports `uuid()`, `name()`, `tell(message)`, `position()`, `level()`, `heldItem()`, `give(id, count)`, `teleport(x, y, z)`, and string `data(key)` / `data(key, value)`. `entity` supports `uuid()`, `type()`, `position()`, `health()` for living entities, and the same data methods. Mantis entity data saves under its own persistent NBT compound; player data is copied across player cloning/respawns. `stack` is a snapshot with `id()`, `count()`, and `nbt()` (SNBT). `level` supports `dimension()`, `block(x, y, z)`, `setBlock(x, y, z, id)`, and `dayTime()`. Inventory, world and entity operations require the server thread.
+
+```js
+import { events } from 'mantis:events';
+events.on('block.broken', { block: 'minecraft:diamond_block' }, event => {
+  event.control.cancel();
+  event.player.tell('This block is protected.');
+});
+```
 
 Operator commands: `/mantis clock`, `/mantis status`, `/mantis reload`, `/mantis scripts`, `/mantis modules`, `/mantis profile`, `/mantis errors`. Status includes lifecycle state, scripts, listeners, timers, pending async operations, and accumulated script time. Profile shows operation totals, maximum duration, failures, and source-cache counts. Timings are inclusive: a host bridge operation can be part of a function or module timing. Each generation retains the last 32 error descriptions; internal Java traces use debug logging.
 
@@ -94,11 +181,11 @@ Lifecycle hooks are `load`, `init`, `start`, `reload`, `stop`, `unload`, and `er
 
 `mantis-core`, `mantis-interop`, `mantis-runtime`, `mantis-recipes`, and `mantis-rhino-compat` have no Minecraft or loader dependency. Java applications can create a `MantisEngine`, supply source snapshots and host modules, then evaluate modules and invoke exported functions.
 
-Mods register extensions with `MantisApi.registerExtension(modId, registrar -> ...)` during construction or common setup. Use `registrar.module("modid:api", Map.of("api", object))` to provide a virtual module. Annotate callable host methods/fields/constructors with `@MantisExport`; use `@MantisProperty("name")` on a zero-argument getter and optional one-argument void setter. Session modules bind these members explicitly through cached MethodHandles. `registrar.bindings().type(MyClass.class)` exposes its annotated static members and constructors. Unannotated members stay hidden.
+Mods register extensions with `MantisApi.registerExtension(modId, registrar -> ...)` during construction or common setup. Register during construction if startup scripts import the extension: startup runs before common setup. Use `registrar.module("modid:api", Map.of("api", object))` to provide a virtual module. Annotate callable host methods/fields/constructors with `@MantisExport`; use `@MantisProperty("name")` on a zero-argument getter and optional one-argument void setter. Session modules bind these members explicitly through cached MethodHandles. `registrar.bindings().type(MyClass.class)` exposes its annotated static members and constructors. Unannotated members stay hidden.
 
 Overloads prefer exact strings/booleans and lossless integers (`int`, then `long`, `short`, `byte`), followed by fractional `double`, `float`, structured conversions, and the `Object` fallback. Fixed arity precedes varargs. Equally suitable unrelated overloads fail with an ambiguity error. Generic callback parameters support the standard functional interfaces and interfaces annotated with `@MantisExport`; callbacks must run on the host scheduler thread. Use `registrar.bindings().function(Function.class, javaFunction)` to export a Java lambda as a callable JS function.
 
-`registrar.conversions()` registers custom bidirectional converters before loading. Arrays and collections become native JS arrays; string-keyed maps and public records become native JS objects; enums become names; Optional becomes value/null. BigInteger and longs outside the JS safe-integer range become BigInt. Reverse conversion supports generic List/Set/Map/Optional, arrays, records, enums, functional interfaces, and exact numbers. Cycles, excessive nesting, and lossy numeric conversion fail. Minecraft adds ResourceLocation/string and Component/text+JSON converters. Host arrays and record data are copied during ordinary conversion.
+`registrar.conversions()` registers custom bidirectional converters before loading. Arrays and collections become native JS arrays; string-keyed maps and public records become native JS objects; enums become names; Optional becomes value/null. BigInteger and longs outside the JS safe-integer range become BigInt. Reverse conversion supports generic List/Set/Map/Optional, arrays, records, enums, functional interfaces, and exact numbers. Cycles, excessive nesting, and lossy numeric conversion fail. Minecraft adds ResourceLocation/string and Component/text+JSON converters. Host arrays and record data are copied during ordinary conversion. Annotated objects nested inside collections/maps also receive cached bindings, including their method return values.
 
 ```java
 MantisApi.registerExtension("example", registrar -> {
@@ -126,7 +213,7 @@ The [0.2.2 comparison against the supplied Minecraft Rhino fork](mantis-benchmar
 
 The [10,000/20,000-recipe transaction measurements](mantis-benchmarks/results/recipe-transactions.md) compare isolated snapshots with the borrowed delta used by Minecraft. Sparse edits and unchanged recipes avoid most JSON copying; edits touching every recipe still allocate private JSON copies. This comparison covers Java staging/commit work, not script conversion or installed serializer time.
 
-The [0.2.2 review](docs/review-0.2.2.md) records patch corrections and feature gaps found by inspecting the supplied KubeJS/addon jars. Typed recipe schemas, startup registries, wider Minecraft events, loot/tags and installed-mod tests remain priorities. Mantis extensions already contribute modules, bindings, converters and owned resources; the supplied KubeJS plugins do not run unchanged.
+The [0.2.2 review](docs/review-0.2.2.md) records patch corrections and feature gaps found by inspecting the supplied KubeJS/addon jars. The [0.3.0 progress report](docs/progress-0.3.0.md) covers recipe schemas/builders, startup items/blocks, gameplay events, generated loot/tags/assets, and the remaining release work. Mantis extensions already contribute modules, bindings, converters and owned resources; the supplied KubeJS plugins do not run unchanged.
 
 Java class lookup, unexported methods, native access, processes, threads, environment access, arbitrary files, and sockets are unavailable to scripts. Module reads use an in-memory source snapshot. Calls have statement and wall-time limits; exceeding a limit closes the affected context. This is a permissions foundation for pack-authored scripts, not a hardened untrusted-code sandbox. Host methods and extension APIs must enforce their own permissions and cancellation. The shared source cache is bounded by entry count and bytes and keys source content. Its hit/miss/eviction counts cover explicit evaluations, generated entry stubs, and bridge helpers; main module bodies load through the in-memory filesystem and are not counted by that cache. Module instances are confined to a generation; full reloads rebuild dependencies from the new source snapshot. Per-file dependency reloads, client scripting, a custom JavaScript engine, and installed-mod compatibility testing remain future work.
 
@@ -134,6 +221,6 @@ Each outer operation resets the statement budget (default 1,000,000). Callbacks 
 
 An exception in an event handler or repeating timer is logged and the handler stays registered; one that fails ten times in a row is disabled so it cannot flood the log, and a success resets its count. `server.tick` payloads are only built when a script listens for that event. A shared watchdog checks deadlines every 5 ms, and completion also checks elapsed time. Host work must cooperate with cancellation; Java code blocked in a host method cannot be forcibly stopped by a script deadline.
 
-`./gradlew :mantis-minecraft:runGameTestServer` runs an isolated Minecraft test of recipe edits, rejected reloads, timer/future cleanup, server-thread async continuations, Minecraft type conversion, lifecycle hooks, and saved clock data. A registered custom non-crafting serializer verifies nested fusion energy, catalyst/output arrays, ritual fields, and preservation of opaque metadata across reloads. This fixture verifies the generic serializer path; installed Draconic Evolution/Occultism compatibility remains untested. Test scripts, serializers, and structures stay out of the release JAR.
+`./gradlew :mantis-minecraft:runGameTestServer` runs isolated Minecraft tests of startup items/blocks/food, generated tags/loot/assets and pack metadata, vanilla/schema recipe builders, tag-aware replacements, event filtering/cancellation/damage changes, player data cloning, recipe edits, rejected reloads, timer/future cleanup, server-thread async continuations, Minecraft type conversion, lifecycle hooks, and saved clock data. A registered custom non-crafting serializer verifies nested fusion energy, catalyst/output arrays, ritual fields, and preservation of opaque metadata across reloads. This fixture verifies the generic serializer path; installed Draconic Evolution/Occultism compatibility remains untested. Test scripts, serializers, and structures stay out of the release JAR.
 
 `./gradlew :mantis-minecraft:runGameTestServer -PtestFirstLoad` also starts with a deliberately broken server script, verifies unchanged recipes and an empty fallback generation, then removes the broken script and recovers through reload. Both runs check that an extension-registration failure is skipped only by the first-load fallback and rejected by strict reloads.

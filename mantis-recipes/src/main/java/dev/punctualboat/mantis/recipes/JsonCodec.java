@@ -49,7 +49,7 @@ public final class JsonCodec {
             if (p.isBoolean()) return context.value(p.getAsBoolean());
             try {
                 var integer = p.getAsBigDecimal().toBigIntegerExact();
-                return integer.bitLength() <= 53 ? context.value(integer.longValue()) : context.bigInteger(integer.toString());
+                return integer.abs().bitLength() <= 53 ? context.value(integer.longValue()) : context.bigInteger(integer.toString());
             } catch (ArithmeticException ignored) {
                 if (!Double.isFinite(p.getAsDouble())) throw new IllegalArgumentException("JSON numbers must be finite");
                 return context.value(p.getAsDouble());

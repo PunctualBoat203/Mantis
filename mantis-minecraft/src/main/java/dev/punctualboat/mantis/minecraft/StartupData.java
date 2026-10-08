@@ -15,6 +15,7 @@ import java.util.*;
 /** Startup data is an immutable pack after scripts finish; every resource reload reads that same snapshot. */
 public final class StartupData {
     private final Map<ResourceLocation, byte[]> resources = new LinkedHashMap<>();
+    private final Map<ResourceLocation, byte[]> assets = new LinkedHashMap<>();
     private int bytes;
     private boolean frozen;
 
@@ -26,13 +27,16 @@ public final class StartupData {
         return key;
     }
     private void put(ResourceLocation key, JsonObject json, boolean update) {
+        put(resources, key, json, update);
+    }
+    private void put(Map<ResourceLocation, byte[]> target, ResourceLocation key, JsonObject json, boolean update) {
         if (frozen) throw new IllegalStateException("Data declarations are only available during startup loading");
-        if (!update && resources.containsKey(key)) throw new IllegalArgumentException("Duplicate data resource: " + key);
+        if (!update && target.containsKey(key)) throw new IllegalArgumentException("Duplicate generated resource: " + key);
         byte[] encoded = json.toString().getBytes(StandardCharsets.UTF_8);
-        int total = bytes - (resources.containsKey(key) ? resources.get(key).length : 0) + encoded.length;
-        if (encoded.length > 1_048_576 || total > 16_777_216 || !resources.containsKey(key) && resources.size() >= 4096)
+        int total = bytes - (target.containsKey(key) ? target.get(key).length : 0) + encoded.length;
+        if (encoded.length > 1_048_576 || total > 16_777_216 || !target.containsKey(key) && resources.size() + assets.size() >= 4096)
             throw new IllegalArgumentException("Generated data limit exceeded (4096 resources, 1 MiB each, 16 MiB total)");
-        resources.put(key, encoded); bytes = total;
+        target.put(key, encoded); bytes = total;
     }
     private static JsonObject object(Value value) {
         JsonElement json = JsonCodec.read(value);
@@ -40,6 +44,34 @@ public final class StartupData {
         return json.getAsJsonObject();
     }
     @MantisExport public void json(String path, Value value) { put(path(path), object(value), false); }
+    @MantisExport public void assetJson(String path, Value value) { put(assets, path(path), object(value), true); }
+
+    void contentAssets(ResourceLocation id, JsonObject properties, boolean block, boolean blockItem) {
+        String texture = properties.has("texture") ? properties.get("texture").getAsString() : block ? "minecraft:block/stone" : "minecraft:item/paper";
+        texture = RecipeValues.id(texture);
+        String prefix = id.getNamespace() + ":";
+        String modelId = prefix + "block/" + id.getPath();
+        JsonObject model = new JsonObject(), textures = new JsonObject();
+        model.addProperty("parent", block ? "minecraft:block/cube_all" : "minecraft:item/generated");
+        textures.addProperty(block ? "all" : "layer0", texture); model.add("textures", textures);
+        if (block) {
+            put(assets, path(prefix + "models/block/" + id.getPath() + ".json"), model, false);
+            JsonObject state = new JsonObject(), variants = new JsonObject(), value = new JsonObject(); value.addProperty("model", modelId); variants.add("", value); state.add("variants", variants);
+            put(assets, path(prefix + "blockstates/" + id.getPath() + ".json"), state, false);
+            if (blockItem) {
+                JsonObject item = new JsonObject(); item.addProperty("parent", modelId);
+                put(assets, path(prefix + "models/item/" + id.getPath() + ".json"), item, false);
+            }
+        } else put(assets, path(prefix + "models/item/" + id.getPath() + ".json"), model, false);
+        if (properties.has("displayName")) {
+            String name = properties.get("displayName").getAsString();
+            if (name.isBlank() || name.length() > 256) throw new IllegalArgumentException("displayName must contain 1-256 characters");
+            ResourceLocation langPath = path(prefix + "lang/en_us.json");
+            JsonObject lang = assets.containsKey(langPath) ? JsonParser.parseString(new String(assets.get(langPath), StandardCharsets.UTF_8)).getAsJsonObject() : new JsonObject();
+            lang.addProperty((block ? "block." : "item.") + id.getNamespace() + "." + id.getPath().replace('/', '.'), name);
+            put(assets, langPath, lang, true);
+        }
+    }
     @MantisExport public void lootTable(String id, Value value) {
         ResourceLocation key = new ResourceLocation(RecipeValues.id(id));
         put(path(key.getNamespace() + ":loot_tables/" + key.getPath() + ".json"), object(value), false);
@@ -75,33 +107,34 @@ public final class StartupData {
     }
     private static String tagId(String id) { return id.startsWith("#") ? "#" + RecipeValues.id(id.substring(1)) : RecipeValues.id(id); }
 
-    public PackResources open(String id) {
+    public PackResources open(String id, PackType type) {
         if (!frozen) throw new IllegalStateException("Startup data has not finished loading");
-        return new Resources(id, Map.copyOf(resources));
+        return new Resources(id, type, Map.copyOf(type == PackType.SERVER_DATA ? resources : assets));
     }
     private static final class Resources extends AbstractPackResources {
         private static final byte[] META = "{\"pack\":{\"pack_format\":15,\"description\":\"Mantis startup data\"}}".getBytes(StandardCharsets.UTF_8);
         private final Map<ResourceLocation, byte[]> entries;
         private final Set<String> namespaces;
-        Resources(String id, Map<ResourceLocation, byte[]> entries) {
-            super(id, false); this.entries = entries;
+        private final PackType type;
+        Resources(String id, PackType type, Map<ResourceLocation, byte[]> entries) {
+            super(id, false); this.type = type; this.entries = entries;
             Set<String> names = new HashSet<>(); entries.keySet().forEach(key -> names.add(key.getNamespace())); namespaces = Set.copyOf(names);
         }
         @Override public IoSupplier<InputStream> getRootResource(String... path) {
             return path.length == 1 && path[0].equals("pack.mcmeta") ? () -> new ByteArrayInputStream(META) : null;
         }
         @Override public IoSupplier<InputStream> getResource(PackType type, ResourceLocation id) {
-            byte[] bytes = type == PackType.SERVER_DATA ? entries.get(id) : null;
+            byte[] bytes = type == this.type ? entries.get(id) : null;
             return bytes == null ? null : () -> new ByteArrayInputStream(bytes);
         }
         @Override public void listResources(PackType type, String namespace, String path, PackResources.ResourceOutput output) {
-            if (type != PackType.SERVER_DATA) return;
+            if (type != this.type) return;
             String prefix = path.isEmpty() ? "" : path + "/";
             entries.forEach((key, bytes) -> {
                 if (key.getNamespace().equals(namespace) && key.getPath().startsWith(prefix)) output.accept(key, () -> new ByteArrayInputStream(bytes));
             });
         }
-        @Override public Set<String> getNamespaces(PackType type) { return type == PackType.SERVER_DATA ? namespaces : Set.of(); }
+        @Override public Set<String> getNamespaces(PackType type) { return type == this.type ? namespaces : Set.of(); }
         @Override public void close() {}
     }
 }

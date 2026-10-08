@@ -43,8 +43,8 @@ public final class Mantis {
     private PreparedScripts active;
     private ClockData clockData;
     private TickClock clock;
-    private final StartupRegistries registries = new StartupRegistries();
     private final StartupData data = new StartupData();
+    private final StartupRegistries registries = new StartupRegistries(data);
 
     public Mantis() {
         instance = this;
@@ -72,11 +72,11 @@ public final class Mantis {
 
     private void register(RegisterEvent event) { prepareStartup(); registries.register(event); }
     private void packs(AddPackFindersEvent event) {
-        if (event.getPackType() != PackType.SERVER_DATA) return;
         prepareStartup();
+        PackType type = event.getPackType();
         event.addRepositorySource(accept -> {
-            Pack pack = Pack.readMetaAndCreate("mantis:generated", Component.literal("Mantis startup data"), true,
-                    data::open, PackType.SERVER_DATA, Pack.Position.TOP, PackSource.BUILT_IN);
+            Pack pack = Pack.readMetaAndCreate("mantis:generated", Component.literal("Mantis startup resources"), true,
+                    id -> data.open(id, type), type, Pack.Position.TOP, PackSource.BUILT_IN);
             if (pack == null) throw new IllegalStateException("Could not load Mantis generated pack metadata");
             accept.accept(pack);
         });

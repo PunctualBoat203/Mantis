@@ -55,6 +55,11 @@ public final class MinecraftEvents {
     @SubscribeEvent public static void respawn(PlayerEvent.PlayerRespawnEvent event) {
         if (!ready(event.getEntity(), "player.respawned")) return; send("player.respawned", event, entity(event.getEntity()));
     }
+    @SubscribeEvent public static void clone(PlayerEvent.Clone event) {
+        if (event.getEntity().level().isClientSide) return;
+        var original = event.getOriginal().getPersistentData();
+        if (original.contains("mantis", net.minecraft.nbt.Tag.TAG_COMPOUND)) event.getEntity().getPersistentData().put("mantis", original.getCompound("mantis").copy());
+    }
     @SubscribeEvent public static void dimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (!ready(event.getEntity(), "player.changed_dimension")) return;
         Map<String, Object> data = entity(event.getEntity()); data.put("from", event.getFrom().location().toString()); data.put("to", event.getTo().location().toString()); send("player.changed_dimension", event, data);
