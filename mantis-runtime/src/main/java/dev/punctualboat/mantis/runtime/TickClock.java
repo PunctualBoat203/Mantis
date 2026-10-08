@@ -17,12 +17,18 @@ public final class TickClock implements AutoCloseable {
     private final Consumer<Throwable> errors;
     private final Runnable dirty;
     private final int callbacksPerTick;
+    private final int maxFailures;
     private long ticks;
     private long nextId;
     private boolean closed;
 
     public TickClock(Snapshot saved, Runnable dirty, Consumer<Throwable> errors, int callbacksPerTick) {
-        if (saved.ticks() < 0 || callbacksPerTick < 1) throw new IllegalArgumentException("Invalid clock state or callback budget");
+        this(saved, dirty, errors, callbacksPerTick, EventBus.DEFAULT_MAX_FAILURES);
+    }
+
+    public TickClock(Snapshot saved, Runnable dirty, Consumer<Throwable> errors, int callbacksPerTick, int maxFailures) {
+        if (saved.ticks() < 0 || callbacksPerTick < 1 || maxFailures < 1) throw new IllegalArgumentException("Invalid clock state or callback budget");
+        this.maxFailures = maxFailures;
         this.ticks = saved.ticks();
         saved.cooldowns().forEach((key, due) -> { validateKey(key); if (due > ticks) cooldowns.put(key, due); });
         this.dirty = Objects.requireNonNull(dirty);
@@ -32,8 +38,12 @@ public final class TickClock implements AutoCloseable {
 
     public TickClock() { this(new Snapshot(0, Map.of()), () -> {}, error -> {}, 256); }
 
-    private void checkThread() {
+    private void checkOwner() {
         if (Thread.currentThread() != owner) throw new IllegalStateException("Clock access must run on its host thread");
+    }
+
+    private void checkThread() {
+        checkOwner();
         if (closed) throw new IllegalStateException("Clock is closed");
     }
 
@@ -52,9 +62,14 @@ public final class TickClock implements AutoCloseable {
             Timer timer = timers.remove();
             if (!timer.active) continue;
             if (timer.period == 0) timer.active = false;
-            try { timer.callback.run(); }
-            catch (RuntimeException error) { timer.active = false; errors.accept(error); }
-            if (timer.active && timer.period > 0) {
+            try { timer.callback.run(); timer.failures = 0; }
+            catch (RuntimeException error) {
+                if (++timer.failures >= maxFailures) timer.close();
+                timer.report.accept(error);
+            }
+            finally { if (timer.period == 0) timer.close(); }
+            if (closed) timer.close();
+            else if (timer.active && timer.period > 0) {
                 timer.due = Math.addExact(ticks, timer.period);
                 timers.add(timer);
             }
@@ -105,17 +120,33 @@ public final class TickClock implements AutoCloseable {
         private final long period;
         private final Runnable callback;
         private boolean active = true;
+        private int failures;
+        private Consumer<Throwable> report = errors;
+        private Runnable closedHook = () -> {};
+        private boolean notified;
         private Timer(long id, long due, long period, Runnable callback) { this.id = id; this.due = due; this.period = period; this.callback = callback; }
+        public Timer onError(Consumer<Throwable> report) { checkThread(); this.report = Objects.requireNonNull(report); return this; }
+        public Timer whenClosed(Runnable hook) { checkThread(); closedHook = Objects.requireNonNull(hook); return this; }
         @MantisExport public void cancel() { close(); }
         @MantisExport public boolean active() { checkThread(); return active; }
-        @Override public void close() { checkThread(); active = false; timers.remove(this); }
+        @Override public void close() {
+            checkOwner(); active = false; timers.remove(this);
+            if (!notified) { notified = true; closedHook.run(); }
+        }
     }
 
     @Override public void close() {
-        if (closed && Thread.currentThread() == owner) return;
-        checkThread();
-        timers.forEach(timer -> timer.active = false);
-        timers.clear();
+        checkOwner();
+        if (closed) return;
         closed = true;
+        RuntimeException failure = null;
+        for (Timer timer : List.copyOf(timers)) {
+            try { timer.close(); }
+            catch (RuntimeException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+        }
+        if (failure != null) throw failure;
     }
 }

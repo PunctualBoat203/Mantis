@@ -11,8 +11,17 @@ public final class RecipeTransaction {
     private final Set<String> changed = new LinkedHashSet<>();
     private boolean committed;
 
-    public RecipeTransaction(Map<String, JsonObject> original) {
-        original.forEach((id, json) -> staged.put(id, json.deepCopy()));
+    public RecipeTransaction(Map<String, JsonObject> original) { this(original, false); }
+
+    private RecipeTransaction(Map<String, JsonObject> original, boolean borrow) {
+        original.forEach((id, json) -> staged.put(id, borrow ? json : json.deepCopy()));
+    }
+
+    /** The caller owns the source JSON and must keep it unchanged until commit. Writes and reads remain detached. */
+    public static RecipeTransaction borrowing(Map<String, JsonObject> original) { return new RecipeTransaction(original, true); }
+
+    public record Changes(Map<String, JsonObject> replacements, Set<String> removed) {
+        public Changes { replacements = Collections.unmodifiableMap(new TreeMap<>(replacements)); removed = Set.copyOf(removed); }
     }
 
     private void checkOpen() { if (committed) throw new IllegalStateException("Recipe transaction is closed"); }
@@ -57,6 +66,10 @@ public final class RecipeTransaction {
 
     public List<String> matching(RecipeFilter filter) {
         checkOpen();
+        if (filter.id() != null) {
+            JsonObject json = staged.get(filter.id());
+            return json != null && filter.matches(filter.id(), json) ? List.of(filter.id()) : List.of();
+        }
         return staged.entrySet().stream().filter(entry -> filter.matches(entry.getKey(), entry.getValue())).map(Map.Entry::getKey).toList();
     }
 
@@ -69,11 +82,29 @@ public final class RecipeTransaction {
 
     public Map<String, JsonObject> commit(BiConsumer<String, JsonObject> validator) {
         checkOpen();
-        for (String id : changed) if (staged.containsKey(id)) validator.accept(id, staged.get(id).deepCopy());
+        validateChanges(validator);
         Map<String, JsonObject> result = new TreeMap<>();
         staged.forEach((id, json) -> result.put(id, json.deepCopy()));
         committed = true;
         return result;
+    }
+
+    public Changes commitChanges(BiConsumer<String, JsonObject> validator) {
+        checkOpen();
+        validateChanges(validator);
+        Map<String, JsonObject> replacements = new TreeMap<>();
+        Set<String> removed = new LinkedHashSet<>();
+        for (String id : changed) {
+            JsonObject json = staged.get(id);
+            if (json == null) removed.add(id);
+            else replacements.put(id, json.deepCopy());
+        }
+        committed = true;
+        return new Changes(replacements, removed);
+    }
+
+    private void validateChanges(BiConsumer<String, JsonObject> validator) {
+        for (String id : changed) if (staged.containsKey(id)) validator.accept(id, staged.get(id).deepCopy());
     }
 
     public Set<String> changedIds() { return Set.copyOf(changed); }

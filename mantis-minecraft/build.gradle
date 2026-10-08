@@ -41,6 +41,7 @@ minecraft {
         gameTestServer {
             workingDirectory project.file('run-gametest')
             property 'forge.enabledGameTestNamespaces', 'mantis'
+            if (project.hasProperty('testFirstLoad')) property 'mantis.test.firstload', 'true'
             mods { mantis { source sourceSets.gametest } }
         }
     }
@@ -86,5 +87,10 @@ tasks.named('build').configure { dependsOn 'jarJar' }
 tasks.register('prepareGameTestScripts', Copy) {
     from 'src/gametest/scripts'
     into 'run-gametest/config/mantis/server_scripts'
+    doLast {
+        def failure = file('run-gametest/config/mantis/server_scripts/000-initial-failure.js')
+        if (project.hasProperty('testFirstLoad')) failure.text = "throw new Error('Intentional first-load test failure');\n"
+        else failure.delete()
+    }
 }
 tasks.matching { it.name == 'runGameTestServer' }.configureEach { dependsOn 'prepareGameTestScripts' }

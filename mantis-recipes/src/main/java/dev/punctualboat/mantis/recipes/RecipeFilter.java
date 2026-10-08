@@ -16,9 +16,14 @@ public record RecipeFilter(String id, String type, String mod) {
         return object.has(name) ? object.get(name).getAsString() : null;
     }
 
+    /** Equivalent to {@code recipeId.startsWith(mod + ":")} without allocating a string per recipe. */
+    private static boolean inNamespace(String recipeId, String mod) {
+        return recipeId.length() > mod.length() && recipeId.charAt(mod.length()) == ':' && recipeId.startsWith(mod);
+    }
+
     public boolean matches(String recipeId, JsonObject json) {
         return (id == null || id.equals(recipeId))
                 && (type == null || json.has("type") && type.equals(json.get("type").getAsString()))
-                && (mod == null || recipeId.startsWith(mod + ":"));
+                && (mod == null || inNamespace(recipeId, mod));
     }
 }

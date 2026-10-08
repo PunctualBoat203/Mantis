@@ -1,6 +1,7 @@
 package dev.punctualboat.mantis.core;
 
 import org.graalvm.polyglot.Engine;
+import com.oracle.truffle.api.Truffle;
 
 import java.util.Map;
 import java.util.Set;
@@ -8,12 +9,22 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 
 public final class MantisEngine implements AutoCloseable {
-    private final Engine engine = Engine.newBuilder("js").useSystemProperties(false)
-            .option("engine.WarnInterpreterOnly", "false").build();
-    private final ExecutionWatchdog watchdog = new ExecutionWatchdog();
+    private final Engine engine;
+    private final ExecutionLimits limits;
+    private final ExecutionWatchdog watchdog;
     private final Set<MantisContext> contexts = ConcurrentHashMap.newKeySet();
     private final SourceCache sources = new SourceCache(512, 8 * 1024 * 1024);
     private boolean closed;
+
+    public MantisEngine() { this(ExecutionLimits.DEFAULT); }
+    public MantisEngine(ExecutionLimits limits) {
+        this.limits = java.util.Objects.requireNonNull(limits);
+        engine = Engine.newBuilder("js").useSystemProperties(false).option("engine.WarnInterpreterOnly", "false").build();
+        watchdog = new ExecutionWatchdog();
+    }
+
+    public ExecutionLimits limits() { return limits; }
+    public String runtimeName() { return Truffle.getRuntime().getName(); }
 
     public record CacheStats(long hits, long misses, long evictions, int entries, long bytes) {}
 
@@ -24,7 +35,7 @@ public final class MantisEngine implements AutoCloseable {
     public synchronized MantisContext createContext(Map<String, String> sources, Map<String, Map<String, Object>> modules,
                                                      BiFunction<MantisContext, Object, Object> exports) {
         if (closed) throw new IllegalStateException("Engine is closed");
-        MantisContext context = new MantisContext(engine, watchdog, this.sources, sources, modules, exports);
+        MantisContext context = new MantisContext(engine, watchdog, limits, this.sources, sources, modules, exports);
         contexts.add(context);
         return context;
     }

@@ -49,6 +49,35 @@ class ExecutionLimitsTest {
         });
     }
 
+    @Test void loadPhaseInvocationsGetTheLongerBudgetThanOrdinaryCallbacks() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            try (MantisEngine engine = new MantisEngine()) {
+                SlowHost host = new SlowHost();
+                var context = engine.createContext(Map.of("slow.js", "import {host} from 'test:api'; export const work = () => host.work();"),
+                        Map.of("test:api", Map.of("host", host)));
+                host.context = context;
+                var callback = context.evaluateModule("slow.js").getMember("work");
+                context.invokeLoad(callback);
+                assertFalse(context.isClosed());
+                assertThrows(ScriptException.class, () -> context.invoke(callback));
+                assertTrue(context.isClosed());
+            }
+        });
+    }
+
+    @Test void configuredLimitsReplaceTheDefaultCallbackBudget() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            try (MantisEngine engine = new MantisEngine(new ExecutionLimits(Duration.ofSeconds(2), Duration.ofSeconds(10), 1_000_000))) {
+                SlowHost host = new SlowHost();
+                var context = engine.createContext(Map.of("slow.js", "import {host} from 'test:api'; export const work = () => host.work();"),
+                        Map.of("test:api", Map.of("host", host)));
+                host.context = context;
+                context.invoke(context.evaluateModule("slow.js").getMember("work"));
+                assertFalse(context.isClosed());
+            }
+        });
+    }
+
     @Test void hostOnlyAccessCannotReturnSuccessfullyAfterItsDeadline() {
         assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
             try (MantisEngine engine = new MantisEngine()) {

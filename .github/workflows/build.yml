@@ -32,6 +32,15 @@ jobs:
           PY
       - name: Verify benchmark cases execute
         run: ./gradlew :mantis-benchmarks:benchmarkSmoke --stacktrace
+      - name: Verify first-load failure and recovery
+        run: |
+          ./gradlew :mantis-minecraft:runGameTestServer -PtestFirstLoad --stacktrace | tee gametest-firstload.log
+          python3 - <<'PY'
+          import pathlib, re
+          log = pathlib.Path('gametest-firstload.log').read_text()
+          if not re.search(r'All [1-9][0-9]* required tests passed', log):
+              raise SystemExit('Minecraft did not report a completed passing first-load recovery test')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

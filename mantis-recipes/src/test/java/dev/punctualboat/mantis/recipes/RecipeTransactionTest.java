@@ -30,6 +30,64 @@ class RecipeTransactionTest {
         assertEquals(1000, original.get("example:fusion").get("energy").getAsInt());
     }
 
+    @Test void borrowedTransactionsPublishOnlyDetachedChanges() {
+        Map<String, JsonObject> original = recipes();
+        JsonObject untouched = original.get("create:mix");
+        JsonObject edited = original.get("example:fusion");
+        RecipeTransaction transaction = RecipeTransaction.borrowing(original);
+        transaction.set(new RecipeFilter("example:fusion", null, null), "/energy", new JsonPrimitive(5));
+        Map<String, JsonObject> result = transaction.commitChanges((id, value) -> {}).replacements();
+        assertFalse(result.containsKey("create:mix"));
+        assertSame(untouched, original.get("create:mix"));
+        assertNotSame(edited, result.get("example:fusion"));
+        assertEquals(1000, edited.get("energy").getAsInt());
+        assertEquals(5, result.get("example:fusion").get("energy").getAsInt());
+        assertEquals(Set.of("example:fusion"), transaction.changedIds());
+    }
+
+    @Test void ordinaryTransactionsSnapshotInputsAndDetachTheirFullResult() {
+        Map<String, JsonObject> original = recipes();
+        RecipeTransaction transaction = new RecipeTransaction(original);
+        original.get("create:mix").addProperty("heatRequirement", "changed_after_construction");
+        assertEquals("heated", transaction.get("create:mix").get("heatRequirement").getAsString());
+        var result = transaction.commit((id, value) -> {});
+        result.get("example:fusion").addProperty("energy", 77);
+        assertEquals(1000, original.get("example:fusion").get("energy").getAsInt());
+    }
+
+    @Test void borrowedChangesRetainAtomicValidationAndDoNotIncludeUntouchedRecipes() {
+        Map<String, JsonObject> original = recipes();
+        RecipeTransaction transaction = RecipeTransaction.borrowing(original);
+        transaction.remove(new RecipeFilter("example:ritual", null, null));
+        transaction.set(new RecipeFilter("example:fusion", null, null), "/energy", new JsonPrimitive(9));
+        assertThrows(IllegalArgumentException.class, () -> transaction.commitChanges((id, value) -> { throw new IllegalArgumentException("bad serializer"); }));
+        assertEquals(1000, original.get("example:fusion").get("energy").getAsInt());
+        var changes = transaction.commitChanges((id, value) -> value.addProperty("energy", 999));
+        assertEquals(Set.of("example:ritual"), changes.removed());
+        assertEquals(Set.of("example:fusion"), changes.replacements().keySet());
+        assertEquals(9, changes.replacements().get("example:fusion").get("energy").getAsInt());
+        assertEquals("heated", original.get("create:mix").get("heatRequirement").getAsString());
+        assertThrows(IllegalStateException.class, () -> transaction.get("example:fusion"));
+    }
+
+    @Test void readsNeverLetCallersMutateStagedOrOriginalRecipes() {
+        Map<String, JsonObject> original = recipes();
+        RecipeTransaction transaction = new RecipeTransaction(original);
+        transaction.get("create:mix").addProperty("heatRequirement", "superheated");
+        assertEquals("heated", transaction.get("create:mix").get("heatRequirement").getAsString());
+        assertEquals("heated", original.get("create:mix").get("heatRequirement").getAsString());
+    }
+
+    @Test void exactIdFiltersAndNamespaceFiltersMatchTheSameRecipesAsAFullScan() {
+        RecipeTransaction transaction = new RecipeTransaction(recipes());
+        assertEquals(List.of("example:fusion"), transaction.matching(new RecipeFilter("example:fusion", null, null)));
+        assertEquals(List.of(), transaction.matching(new RecipeFilter("example:fusion", "create:mixing", null)));
+        assertEquals(List.of(), transaction.matching(new RecipeFilter("missing:recipe", null, null)));
+        assertEquals(List.of("example:fusion", "example:ritual"), transaction.matching(new RecipeFilter(null, null, "example")));
+        assertEquals(List.of(), transaction.matching(new RecipeFilter(null, null, "exampl")));
+        assertEquals(List.of(), transaction.matching(new RecipeFilter(null, null, "example:fusion")));
+    }
+
     @Test void filtersByRecipeIdSerializerTypeAndNamespace() {
         RecipeTransaction transaction = new RecipeTransaction(recipes());
         assertEquals(2, transaction.remove(new RecipeFilter(null, null, "example")));

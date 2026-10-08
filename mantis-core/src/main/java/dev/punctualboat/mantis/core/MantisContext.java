@@ -16,6 +16,7 @@ public final class MantisContext implements AutoCloseable {
     private final Map<Value, String> functionLabels = new WeakHashMap<>();
     private final SourceCache sourceCache;
     private final ExecutionWatchdog.Guard execution;
+    private final ExecutionLimits limits;
     private final Diagnostics diagnostics = new Diagnostics();
     private final Value helpers;
     private boolean closed;
@@ -24,9 +25,10 @@ public final class MantisContext implements AutoCloseable {
 
     public record ModuleStats(long hits, long misses, List<String> loaded) {}
 
-    MantisContext(Engine engine, ExecutionWatchdog watchdog, SourceCache sourceCache,
+    MantisContext(Engine engine, ExecutionWatchdog watchdog, ExecutionLimits limits, SourceCache sourceCache,
                   Map<String, String> sources, Map<String, Map<String, Object>> modules,
                   BiFunction<MantisContext, Object, Object> exports) {
+        this.limits = limits;
         this.sources = Map.copyOf(sources);
         this.sourceCache = sourceCache;
         context = Context.newBuilder("js").engine(engine)
@@ -38,11 +40,11 @@ public final class MantisContext implements AutoCloseable {
                 .allowIO(IOAccess.newBuilder().fileSystem(new ModuleFiles(sources, modules)).build())
                 .option("js.esm-eval-returns-exports", "true")
                 .option("js.java-package-globals", "false")
-                .resourceLimits(ResourceLimits.newBuilder().statementLimit(1_000_000, source -> true).build())
+                .resourceLimits(ResourceLimits.newBuilder().statementLimit(limits.statements(), source -> true).build())
                 .build();
         execution = watchdog.register(() -> context.close(true));
         try {
-            helpers = run("initialize", Duration.ofSeconds(10), () -> context.eval(sourceCache.get("mantis:values", """
+            helpers = run("initialize", limits.load(), () -> context.eval(sourceCache.get("mantis:values", """
                 (() => {
                   const parse = JSON.parse, stringify = JSON.stringify, PromiseType = Promise, ErrorType = Error;
                   const from = Array.from, assign = Object.assign, create = Object.create, BigIntType = BigInt;
@@ -70,7 +72,7 @@ public final class MantisContext implements AutoCloseable {
         String entry = "import * as namespace from '" + path.toUri().toASCIIString() + "'; export {namespace}; export const initialized = true;";
         Source source = sourceCache.get(name + " [entry]", entry,
                 Path.of("/mantis/entries").resolve(name).toUri(), true);
-        Value value = run("module:" + name, Duration.ofSeconds(10), () -> {
+        Value value = run("module:" + name, limits.load(), () -> {
             Value exports = context.eval(source);
             try {
                 if (!exports.getMember("initialized").asBoolean()) throw new IllegalStateException("Module has not finished loading: " + name);
@@ -84,11 +86,16 @@ public final class MantisContext implements AutoCloseable {
     }
 
     public Value evaluate(String name, String code) {
-        return run("evaluate:" + name, Duration.ofSeconds(10), () -> context.eval(sourceCache.get(name, code, null, false)));
+        return run("evaluate:" + name, limits.load(), () -> context.eval(sourceCache.get(name, code, null, false)));
     }
 
-    public Value invoke(Value function, Object... arguments) {
-        return access("callback", () -> {
+    public Value invoke(Value function, Object... arguments) { return invokeWithin(limits.callback(), function, arguments); }
+
+    /** Like {@link #invoke} but with the longer load-phase budget, for handlers of events that run while the server is loading. */
+    public Value invokeLoad(Value function, Object... arguments) { return invokeWithin(limits.load(), function, arguments); }
+
+    private Value invokeWithin(Duration limit, Value function, Object... arguments) {
+        return run("callback", limit, () -> {
             if (!function.canExecute()) throw new IllegalArgumentException("Expected a JavaScript function");
             String label = functionLabels.computeIfAbsent(function, value -> {
                 SourceSection source = value.getSourceLocation();
@@ -115,7 +122,8 @@ public final class MantisContext implements AutoCloseable {
     public Value error(String message) { return access("async:error", () -> helpers.getMember("error").execute(message)); }
     public Value bigInteger(String value) { return access("convert:bigint", () -> helpers.getMember("bigint").execute(value)); }
 
-    public <T> T access(String operation, Supplier<T> action) { return run(operation, Duration.ofMillis(250), action); }
+    public <T> T access(String operation, Supplier<T> action) { return run(operation, limits.callback(), action); }
+    public <T> T loadAccess(String operation, Supplier<T> action) { return run(operation, limits.load(), action); }
     public <T> T measure(String operation, Supplier<T> action) {
         long start = System.nanoTime(); boolean failed = true;
         try { T result = action.get(); failed = false; return result; }

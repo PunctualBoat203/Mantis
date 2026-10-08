@@ -2,11 +2,16 @@ package dev.punctualboat.mantis.benchmarks;
 
 import org.junit.jupiter.api.Test;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BenchmarkFixtureTest {
     @Test void allBackendsExecuteTheSameWorkloadWithTheSameResults() {
-        for (String backend : new String[]{"mantis","rhino-interpreted","rhino-compiled"}) {
+        var backends = new ArrayList<>(List.of("mantis", "rhino-interpreted", "rhino-compiled"));
+        try { Class.forName("dev.punctualboat.mantis.benchmarks.MinecraftRhinoBackend"); backends.add("rhino-minecraft"); }
+        catch (ClassNotFoundException ignored) {}
+        for (String backend : backends) {
             try (var runtime = EngineBenchmarks.create(backend)) {
                 assertEquals(43, runtime.call("simple", 21), backend);
                 assertEquals(42, runtime.call("method", 21), backend);

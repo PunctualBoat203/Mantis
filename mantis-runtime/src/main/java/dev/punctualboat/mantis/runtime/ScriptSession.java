@@ -26,6 +26,9 @@ public final class ScriptSession implements AutoCloseable {
         public Object bind(Object object) { return bindings.bind(object); }
     }
 
+    /** Events dispatched while the server is loading; their handlers get the longer load-phase execution budget. */
+    private static final Set<String> LOAD_EVENTS = Set.of("startup", "recipes", "lifecycle.load", "lifecycle.init");
+
     private final ResourceScope resources = new ResourceScope();
     private final Map<String, Map<String, Object>> modules = new LinkedHashMap<>();
     private final EventBus events;
@@ -122,7 +125,13 @@ public final class ScriptSession implements AutoCloseable {
     private void report(Throwable error) {
         if (recentErrors.size() == 32) recentErrors.removeFirst();
         recentErrors.addLast(error instanceof ScriptException script ? script.format() : error.toString());
-        if (context != null && context.isClosed() && state == SessionState.RUNNING) { failure = error; transition(SessionState.FAILED); }
+        if (context != null && context.isClosed() && state == SessionState.RUNNING) {
+            failure = error; transition(SessionState.FAILED);
+            try { async.close(); } catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+            try { resources.close(); } catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+            bindings.close();
+            try { engine.release(context); } catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+        }
         if (!reporting && context != null && !context.isClosed() && state != SessionState.DISPOSED) {
             reporting = true;
             try { events.emit("lifecycle.error", MantisContext.readOnly(Map.of("message", error.getMessage() == null ? error.toString() : error.getMessage()))); }
@@ -136,7 +145,13 @@ public final class ScriptSession implements AutoCloseable {
         @MantisExport public EventBus.Subscription once(String name, Value callback) { return subscribe(name, callback, true); }
         private EventBus.Subscription subscribe(String name, Value callback, boolean once) {
             if (!callback.canExecute()) throw new IllegalArgumentException("Event callback must be a function");
-            EventBus.Subscription subscription = events.subscribe(name, event -> context.invoke(callback, bindings.export(event)), once);
+            boolean loadPhase = LOAD_EVENTS.contains(name);
+            EventBus.Subscription subscription = events.subscribe(name, event -> {
+                if (context == null || context.isClosed()) return;
+                Supplier<Value> dispatch = () -> context.invoke(callback, bindings.export(event));
+                if (loadPhase) context.loadAccess("event:" + name, dispatch);
+                else context.access("event:" + name, dispatch);
+            }, once);
             subscription.whenClosed(() -> resources.forget(subscription));
             return resources.own(subscription);
         }
@@ -183,10 +198,15 @@ public final class ScriptSession implements AutoCloseable {
                 if (!active || scheduled != null) return;
                 Runnable action = () -> {
                     if (!repeat) close();
+                    if (context == null || context.isClosed()) { close(); return; }
                     try { context.invoke(callback); }
-                    catch (RuntimeException error) { close(); throw error; }
+                    catch (RuntimeException error) {
+                        if (context.isClosed()) close();
+                        throw error;
+                    }
                 };
                 scheduled = repeat ? ready().every(ticks, action) : ready().after(ticks, action);
+                scheduled.onError(ScriptSession.this::report).whenClosed(this::close);
             }
             @MantisExport public void cancel() { close(); }
             @MantisExport public boolean active() { return active; }

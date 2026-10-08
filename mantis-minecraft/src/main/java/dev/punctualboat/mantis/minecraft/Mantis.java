@@ -33,6 +33,7 @@ public final class Mantis {
     private static final Logger LOG = LogUtils.getLogger();
     private static final Set<PreparedScripts> PENDING = ConcurrentHashMap.newKeySet();
     private static Mantis instance;
+    private final MantisConfig config;
     private MantisEngine engine;
     private ScriptSession startup;
     private PreparedScripts active;
@@ -43,6 +44,7 @@ public final class Mantis {
         instance = this;
         try { ScriptDirectories.create(); }
         catch (IOException error) { throw new IllegalStateException("Could not create Mantis script directories", error); }
+        config = MantisConfig.load(ScriptDirectories.ROOT.resolve("mantis.properties"), Mantis::log);
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         MinecraftForge.EVENT_BUS.addListener(this::reloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::started);
@@ -55,7 +57,8 @@ public final class Mantis {
 
     private void setup(FMLLoadCompleteEvent event) {
         event.enqueueWork(() -> {
-            engine = new MantisEngine();
+            engine = new MantisEngine(config.limits());
+            log("JavaScript runtime: " + engine.runtimeName());
             try {
                 startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
                         Mantis::log, Mantis::report, registrar -> {
@@ -75,6 +78,9 @@ public final class Mantis {
         if (instance == null || instance.engine == null) throw new IllegalStateException("Mantis has not completed common setup");
         return instance.engine;
     }
+    public static MantisConfig config() { return instance == null || instance.config == null ? MantisConfig.DEFAULT : instance.config; }
+    /** True once a script generation has been activated, meaning a failed reload has something to fall back to. */
+    public static boolean hasActive() { return instance != null && instance.active != null; }
     public static void log(String text) { LOG.info("[Mantis] {}", text); }
     public static void report(Throwable error) { LOG.error("[Mantis] {}", error instanceof ScriptException script ? script.format() : error.getMessage()); LOG.debug("Mantis script failure", error); }
     public static void pending(PreparedScripts scripts) { PENDING.add(scripts); }
@@ -128,12 +134,17 @@ public final class Mantis {
         clock.tick();
         active.session().async().drain();
         if (startup != null) startup.async().drain();
-        emit("server.tick", Map.of("ticks", clock.ticks()));
+        // Runs every tick: skip building the payload entirely when no script listens.
+        if (hasListeners("server.tick")) emit("server.tick", Map.of("ticks", clock.ticks()));
+    }
+
+    private boolean hasListeners(String name) {
+        return active != null && active.session().events().hasListeners(name) || startup != null && startup.events().hasListeners(name);
     }
 
     private void emit(String name, Map<String, Object> data) {
-        if (active != null) active.session().events().emit(name, ProxyObject.fromMap(data));
-        if (startup != null) startup.events().emit(name, ProxyObject.fromMap(data));
+        if (active != null && active.session().events().hasListeners(name)) active.session().events().emit(name, ProxyObject.fromMap(data));
+        if (startup != null && startup.events().hasListeners(name)) startup.events().emit(name, ProxyObject.fromMap(data));
     }
 
     private void loggedIn(PlayerEvent.PlayerLoggedInEvent event) {

@@ -9,6 +9,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TickClockTest {
+    @Test void closeReleasesEveryTimerEvenWhenACleanupHookFails() {
+        TickClock clock = new TickClock();
+        AtomicInteger cleaned = new AtomicInteger();
+        var first = clock.every(1, () -> {}).whenClosed(() -> {
+            assertThrows(IllegalStateException.class, () -> clock.after(1, () -> {}));
+            throw new IllegalStateException("cleanup failed");
+        });
+        var second = clock.every(1, () -> {}).whenClosed(cleaned::incrementAndGet);
+        assertThrows(IllegalStateException.class, clock::close);
+        assertEquals(1, cleaned.get());
+        assertDoesNotThrow(first::close);
+        assertDoesNotThrow(second::close);
+        assertDoesNotThrow(clock::close);
+        assertEquals(1, cleaned.get());
+    }
+
     @Test void runsTimersInStableOrderWithoutSameTickRecursion() {
         try (TickClock clock = new TickClock()) {
             List<Integer> calls = new ArrayList<>();
@@ -45,9 +61,24 @@ class TickClockTest {
             clock.every(1, () -> { throw new IllegalStateException("failed timer"); });
             clock.after(1, calls::incrementAndGet);
             clock.tick(); clock.tick();
-            assertEquals(1, errors.size());
+            assertEquals(2, errors.size());
             assertEquals(1, calls.get());
+            assertEquals(1, clock.scheduledTasks());
+            for (int i = 0; i < 20; i++) clock.tick();
+            assertEquals(EventBus.DEFAULT_MAX_FAILURES, errors.size());
             assertEquals(0, clock.scheduledTasks());
+        }
+    }
+
+    @Test void aRepeatingTaskThatRecoversKeepsItsFailureBudget() {
+        List<Throwable> errors = new ArrayList<>();
+        AtomicInteger runs = new AtomicInteger();
+        try (TickClock clock = new TickClock(new TickClock.Snapshot(0, Map.of()), () -> {}, errors::add, 256, 3)) {
+            clock.every(1, () -> { if (runs.incrementAndGet() % 3 != 0) throw new IllegalStateException("flaky timer"); });
+            for (int i = 0; i < 30; i++) clock.tick();
+            assertEquals(30, runs.get());
+            assertEquals(20, errors.size());
+            assertEquals(1, clock.scheduledTasks());
         }
     }
 

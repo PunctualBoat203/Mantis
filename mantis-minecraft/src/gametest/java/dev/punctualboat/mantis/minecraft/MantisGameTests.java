@@ -8,9 +8,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.gametest.GameTestHolder;
 import net.minecraftforge.gametest.PrefixGameTestTemplate;
+import net.minecraftforge.common.crafting.conditions.ICondition;
+import com.google.gson.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 @GameTestHolder("mantis")
@@ -37,15 +40,36 @@ public final class MantisGameTests {
             try { original = Files.readString(ScriptDirectories.SERVER.resolve("smoke.js")); }
             catch (IOException error) { throw new IllegalStateException(error); }
             initialTick = ClockData.get(server).clock().ticks();
+            if (Boolean.getBoolean("mantis.test.firstload")) stage = -2;
         }
 
         void tick() {
+            if (stage == -2) {
+                helper.assertTrue(Mantis.hasActive(), "First-load fallback must activate an empty generation");
+                helper.assertTrue(server.getRecipeManager().byKey(new ResourceLocation("mantis:smoke")).isEmpty(), "Failed first load must not publish scripted recipes");
+                var infusion = (InfusionTestRecipe.Infusion) server.getRecipeManager().byKey(new ResourceLocation("mantis:infusion")).orElseThrow();
+                helper.assertTrue(infusion.energy() == 1000 && infusion.json().getAsJsonObject("ritual").get("duration").getAsInt() == 200,
+                        "First-load failure must preserve original custom recipes");
+                helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 0 && MantisTestExtension.activeFutures() == 0,
+                        "Failed first-load candidate must release timers and futures");
+                try { Files.delete(ScriptDirectories.SERVER.resolve("000-initial-failure.js")); }
+                catch (IOException error) { throw new IllegalStateException(error); }
+                reload = server.reloadResources(server.getPackRepository().getSelectedIds());
+                stage = -1;
+                helper.assertTrue(false, "Waiting for first-load recovery");
+            }
+            if (stage == -1) {
+                helper.assertTrue(reload.isDone(), "Waiting for first-load recovery");
+                helper.assertTrue(!reload.isCompletedExceptionally(), "Fixed first-load scripts must recover through reload");
+                stage = 0;
+            }
             if (stage == 0) {
                 verifyRecipe();
                 helper.assertTrue(ClockData.get(server).clock().scheduledTasks() == 1, "Expected one active script timer");
                 helper.assertTrue(ClockData.get(server).clock().remaining("mantis:async") > 0, "Async values must convert and resume on the server thread");
                 helper.assertTrue(ClockData.get(server).clock().remaining("mantis:lifecycle") > 0, "Lifecycle start hook must run after clock attachment");
                 helper.assertTrue(MantisTestExtension.activeFutures() == 1, "Expected one owned pending future");
+                verifyExtensionFailureFallback();
                 write(original + "\nevents.on('recipes', () => recipes.custom('mantis:bad', { type: 'mantis:missing_serializer' }));\n");
                 reload = server.reloadResources(server.getPackRepository().getSelectedIds());
                 stage = 1;
@@ -75,6 +99,29 @@ public final class MantisGameTests {
                 helper.assertTrue(saved.getLong("ticks") == clock.ticks(), "World data must save the internal counter");
                 helper.assertTrue(saved.getCompound("cooldowns").getLong("mantis:smoke") > clock.ticks(), "World data must save cooldown deadlines");
                 stage = 3;
+            }
+        }
+
+        private void verifyExtensionFailureFallback() {
+            Map<ResourceLocation, JsonElement> jsons = new HashMap<>();
+            ResourceLocation id = new ResourceLocation("mantis:untouched");
+            JsonObject originalJson = JsonParser.parseString("{\"type\":\"minecraft:crafting_special_repairitem\"}").getAsJsonObject();
+            jsons.put(id, originalJson);
+            int before = MantisTestExtension.registrationAttempts;
+            MantisTestExtension.failRegistration = true;
+            try {
+                try (PreparedScripts fallback = RecipeReload.prepare(jsons, ICondition.IContext.EMPTY, true)) {
+                    helper.assertTrue(fallback.session().scriptCount() == 0, "Broken extension must produce an empty first-load fallback");
+                    helper.assertTrue(MantisTestExtension.registrationAttempts == before + 1, "Fallback must not retry the broken extension");
+                    helper.assertTrue(jsons.size() == 1 && jsons.get(id) == originalJson, "Fallback must leave recipe JSON unchanged");
+                }
+                boolean rejected = false;
+                try { RecipeReload.prepare(jsons, ICondition.IContext.EMPTY, false); }
+                catch (IllegalStateException expected) { rejected = true; }
+                helper.assertTrue(rejected, "Strict reload must reject extension failures");
+            } finally {
+                MantisTestExtension.failRegistration = false;
+                Mantis.discardPending();
             }
         }
 

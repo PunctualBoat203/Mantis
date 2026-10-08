@@ -15,8 +15,14 @@ import java.util.concurrent.*;
 @Mod.EventBusSubscriber(modid = "mantis", bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class MantisTestExtension {
     private static final List<CompletableFuture<?>> HELD = new CopyOnWriteArrayList<>();
+    static boolean failRegistration;
+    static int registrationAttempts;
     @SubscribeEvent public static void setup(FMLCommonSetupEvent event) {
-        MantisApi.registerExtension("mantis_test", registrar -> registrar.module("mantis_test:async", Map.of("test", new Host())));
+        MantisApi.registerExtension("mantis_test", registrar -> {
+            registrationAttempts++;
+            if (failRegistration) throw new IllegalStateException("Test extension failed");
+            registrar.module("mantis_test:async", Map.of("test", new Host()));
+        });
     }
     public record Data(ResourceLocation id, Component component, List<Integer> values) {}
     public static final class Host {

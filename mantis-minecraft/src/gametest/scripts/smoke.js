@@ -19,6 +19,9 @@ lifecycle.on('start', () => {
 
 clock.every(1, () => {});
 events.once('server.started', () => clock.cooldown('mantis:smoke', 1000000));
+events.once('server.reloaded', () => {
+  if (clock.remaining('mantis:smoke') === 0) clock.cooldown('mantis:smoke', 1000000);
+});
 
 events.on('recipes', () => {
   recipes.set({ type: 'mantis:test_infusion' }, '/fusion/energy', 32000);

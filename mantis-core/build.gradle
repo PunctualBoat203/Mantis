@@ -1,4 +1,5 @@
 dependencies {
     api "org.graalvm.sdk:graal-sdk:${graal_version}"
+    implementation "org.graalvm.truffle:truffle-api:${graal_version}"
     runtimeOnly "org.graalvm.js:js:${graal_version}"
 }

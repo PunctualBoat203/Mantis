@@ -1,8 +1,17 @@
 dependencies {
     implementation project(':mantis-rhino-compat')
+    implementation project(':mantis-recipes')
     implementation "org.mozilla:rhino:${findProperty('rhinoVersion') ?: '1.9.1'}"
     implementation 'org.openjdk.jmh:jmh-core:1.37'
     annotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
+}
+
+if (findProperty('rhinoModJar')) {
+    sourceSets.main.java.srcDir 'src/reference/java'
+    dependencies {
+        implementation files(findProperty('rhinoModJar'))
+        runtimeOnly 'org.apache.commons:commons-lang3:3.12.0'
+    }
 }
 
 tasks.register('benchmark', JavaExec) {

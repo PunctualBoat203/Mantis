@@ -34,7 +34,7 @@ public class EngineBenchmarks {
             }
             function event(x) { return x + 1; }
             """;
-    private static final List<String> FUNCTIONS = List.of("simple","loop","method","staticMethod","field","property","construct","overload","array","map","recipes","event");
+    static final List<String> FUNCTIONS = List.of("simple","loop","method","staticMethod","field","property","construct","overload","array","map","recipes","event");
 
     public static final class Host {
         @MantisExport public int number;
@@ -55,7 +55,29 @@ public class EngineBenchmarks {
         int loadCollection(int count);
         @Override void close();
     }
-    static Backend create(String backend) { return backend.equals("mantis") ? new MantisBackend() : new RhinoBackend(backend.equals("rhino-interpreted") ? -1 : 9); }
+    interface ReferenceBackendFactory {
+        Backend create();
+        int createAndClose();
+    }
+    private static final class MinecraftRhino {
+        static final ReferenceBackendFactory FACTORY = load();
+        private static ReferenceBackendFactory load() {
+            try {
+                return (ReferenceBackendFactory) Class.forName("dev.punctualboat.mantis.benchmarks.MinecraftRhinoBackend$Factory").getConstructor().newInstance();
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalStateException("Build with -PrhinoModJar=/path/to/rhino-forge.jar to use rhino-minecraft", error);
+            }
+        }
+    }
+    static Backend create(String backend) {
+        return switch (backend) {
+            case "mantis" -> new MantisBackend();
+            case "rhino-interpreted" -> new RhinoBackend(-1);
+            case "rhino-compiled" -> new RhinoBackend(9);
+            case "rhino-minecraft" -> MinecraftRhino.FACTORY.create();
+            default -> throw new IllegalArgumentException("Unknown benchmark backend: " + backend);
+        };
+    }
 
     private static final class MantisBackend implements Backend {
         private final MantisEngine engine = new MantisEngine();
@@ -137,6 +159,7 @@ public class EngineBenchmarks {
     }
 
     @Benchmark public int createAndClose(Fresh fresh) {
+        if (fresh.backend.equals("rhino-minecraft")) return MinecraftRhino.FACTORY.createAndClose();
         if (fresh.backend.equals("mantis")) {
             try (MantisEngine engine = new MantisEngine()) { return engine.createContext(Map.of(), Map.of()).evaluate("empty.js", "1").asInt(); }
         }
