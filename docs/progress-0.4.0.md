@@ -20,4 +20,15 @@ The Create checks edit installed mixing and crushing recipes, preserve output ch
 
 Generic recipe editing applies to mods using RecipeManager and registered serializers. Private recipe storage needs an extension adapter. The existing non-crafting fusion/ritual fixture remains useful for nested JSON checks but does not establish compatibility with installed Draconic Evolution or Occultism. Client scripting, runtime loot modifiers, server-script pack regeneration, broader adapters, multiplayer testing and longer-running modpack checks remain release work.
 
-Verification is recorded after the complete Forge and installed-mod checks finish. Benchmark smoke checks execution only; the earlier scoped benchmark reports remain the performance evidence.
+Verified on Forge 47.4.0 / Java 17 in [CI run 37840506145](https://github.com/PunctualBoat203/Mantis/actions/runs/37840506145), implementation commit `0e2a2b9b49ef401d1ebdc40ab31fb333e4ca000d`:
+
+- 90 unit tests passed, with zero failures or skipped tests.
+- All three required Minecraft GameTests passed in the normal run.
+- All three passed again with deliberate first-load failure and recovery.
+- All three passed with Create installed, including rejection of a malformed Create recipe while retaining the previous recipes, commands, timers and futures.
+- The Forge build and benchmark smoke checks passed.
+- The bundled JAR contains 109 Mantis classes and eight disabled examples; test classes, benchmark classes and reference/installed-mod binaries are excluded. Only the five JavaScript runtime libraries are embedded.
+
+The JAR and report archive checksums match the CI artifacts. Pack metadata, generated resources, declared fluid properties, world placement/collection, creative contents and command dispatch were checked in Minecraft. A visual client and multiplayer test remain pending. Benchmark smoke checks execution only; the earlier scoped benchmark reports remain the performance evidence.
+
+Bundled JAR SHA-256: `b9d7d9b7b58389cbbe088266b7794f78097c4dd2a192b325efd3c47e0a609046`.
