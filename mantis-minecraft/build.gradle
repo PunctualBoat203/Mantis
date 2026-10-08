@@ -85,6 +85,7 @@ tasks.named('jarJar').configure { archiveClassifier = ''; finalizedBy 'reobfJarJ
 tasks.named('build').configure { dependsOn 'jarJar' }
 
 tasks.register('prepareGameTestScripts', Copy) {
+    inputs.property 'testFirstLoad', project.hasProperty('testFirstLoad')
     from 'src/gametest/scripts'
     into 'run-gametest/config/mantis/server_scripts'
     doLast {

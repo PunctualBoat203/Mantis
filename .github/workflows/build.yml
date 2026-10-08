@@ -38,6 +38,8 @@ jobs:
           python3 - <<'PY'
           import pathlib, re
           log = pathlib.Path('gametest-firstload.log').read_text()
+          if 'Intentional first-load test failure' not in log:
+              raise SystemExit('The first-load recovery run did not load the deliberately broken script')
           if not re.search(r'All [1-9][0-9]* required tests passed', log):
               raise SystemExit('Minecraft did not report a completed passing first-load recovery test')
           PY

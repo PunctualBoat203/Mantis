@@ -1,5 +1,9 @@
 # Java 17 baseline
 
+The [supplied Minecraft Rhino fork comparison](minecraft-rhino.md) measures Mantis 0.2.2 against the actual `rhino-forge-2001.2.3-build.10` jar. That fork is interpreter-only; the compiled upstream backend below does not represent KubeJS 1.20.1.
+
+The [10,000/20,000-recipe transaction comparison](recipe-transactions.md) measures isolated snapshots against the borrowed-delta strategy selected by Minecraft. It does not measure either engine's JavaScript or an installed modpack.
+
 The [Mantis 0.2.1 hot-call comparison](hotcalls.md) records later runtime improvements against 0.2.0. The Rhino results below describe the original implementation.
 
 Measured October 7, 2026 on Linux with OpenJDK 17.0.20, a 1 GiB heap, GraalJS 23.0.12, and upstream Rhino 1.9.1. These are host benchmarks, not an installed Minecraft modpack. Each result uses two forks, three 1-second warmups, five 1-second measurements per fork, and JMH's GC profiler. Call inputs vary between invocations. Loading and recipe edits were measured in a separate run with the same settings. The complete scores, error bounds, allocations, and JVM metadata are in [java17-baseline.json](java17-baseline.json).

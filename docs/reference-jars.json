@@ -1,0 +1,87 @@
+[
+  {
+    "file": "KubeJS Blood Magic-1.0.2-1.20.1.jar",
+    "bytes": 11731,
+    "sha256": "ab3f2f856c043a8576955510cf725352063641f1fd642e6d4b6fbf59ed8d4b1b",
+    "classes": 10,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejs-create-forge-2001.3.0-build.8.jar",
+    "bytes": 30960,
+    "sha256": "7ed3229677a98159badd9250f8e9555b5e8f7f7b55981f1a99b11e30574bafd4",
+    "classes": 22,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejs-forge-2001.6.5-build.26(6).jar",
+    "bytes": 1658792,
+    "sha256": "1769312192fbf9d72f45054ba61130523bfb471b5f480a4bff8c210ec09400bb",
+    "classes": 831,
+    "mixins": 65,
+    "mappings": []
+  },
+  {
+    "file": "kubejs-mekanism-forge-2001.1.5.1-build.2(1).jar",
+    "bytes": 72456,
+    "sha256": "05977291c847103e410180e0630befb6aaff391be5e13820c0702e2589dadf2d",
+    "classes": 49,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejs_botania-1.4.0-forge.jar",
+    "bytes": 28516,
+    "sha256": "26b37e33e24f87e411c557a285f5b53c7384497cf8d00c0263db1f10462b72b2",
+    "classes": 23,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejs_enderio-forge-1.20.1-0.6.1.jar",
+    "bytes": 48812,
+    "sha256": "6f885e4f8641f4bb734b2f9d31fa4f07f3aef8bc57f8f0aa97b084f919fdf1a4",
+    "classes": 40,
+    "mixins": 6,
+    "mappings": []
+  },
+  {
+    "file": "kubejs_mystical_agriculture-0.1.0.jar",
+    "bytes": 30763,
+    "sha256": "ddff78efd52c579a81729a4e9a6ae442143b830552441105feb0bf23f73cc1f3",
+    "classes": 23,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejsarsnouveau-1.2.2.jar",
+    "bytes": 13545,
+    "sha256": "ad37a2c5ddaf4b62b01923fc397568804dbae03c60960e1bb6150ec46e89ec06",
+    "classes": 11,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "kubejsca-1.20.1-1.0.jar",
+    "bytes": 10056,
+    "sha256": "7182215cfc1c6bf910ea952275a538a4e8eed91b496dafde05495801ca6182a3",
+    "classes": 6,
+    "mixins": 0,
+    "mappings": []
+  },
+  {
+    "file": "rhino-forge-2001.2.3-build.10(4).jar",
+    "bytes": 1798244,
+    "sha256": "fed2211429301bf043864183cab9ab8e92d4cc4dbb9e488ce6c75217c54584a6",
+    "classes": 446,
+    "mixins": 8,
+    "mappings": [
+      {
+        "name": "mm.jsmappings",
+        "bytes": 781922
+      }
+    ]
+  }
+]
