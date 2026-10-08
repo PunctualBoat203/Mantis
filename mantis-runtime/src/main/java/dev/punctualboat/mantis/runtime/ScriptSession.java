@@ -24,6 +24,11 @@ public final class ScriptSession implements AutoCloseable {
         public HostBindings bindings() { return bindings; }
         public AsyncBridge async() { return async; }
         public Object bind(Object object) { return bindings.bind(object); }
+        public ScriptCallback callback(Value value) {
+            ScriptCallback[] ref = new ScriptCallback[1];
+            ref[0] = new ScriptCallback(value, context(), bindings::export, ScriptSession.this::report, () -> resources.forget(ref[0]));
+            return resources.own(ref[0]);
+        }
     }
 
     /** Events dispatched while the server is loading; their handlers get the longer load-phase execution budget. */

@@ -43,6 +43,17 @@ jobs:
           if not re.search(r'All [1-9][0-9]* required tests passed', log):
               raise SystemExit('Minecraft did not report a completed passing first-load recovery test')
           PY
+      - name: Verify recipes with Create installed
+        run: |
+          ./gradlew :mantis-minecraft:runGameTestServer -PtestCreate --stacktrace | tee gametest-create.log
+          python3 - <<'PY'
+          import pathlib, re
+          log = pathlib.Path('gametest-create.log').read_text()
+          if 'Verified installed Create recipes' not in log:
+              raise SystemExit('The Create integration checks did not execute')
+          if not re.search(r'All [1-9][0-9]* required tests passed', log):
+              raise SystemExit('Minecraft did not report passing tests with Create installed')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

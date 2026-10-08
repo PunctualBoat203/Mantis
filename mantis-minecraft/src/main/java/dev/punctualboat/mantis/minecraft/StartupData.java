@@ -66,11 +66,33 @@ public final class StartupData {
         if (properties.has("displayName")) {
             String name = properties.get("displayName").getAsString();
             if (name.isBlank() || name.length() > 256) throw new IllegalArgumentException("displayName must contain 1-256 characters");
-            ResourceLocation langPath = path(prefix + "lang/en_us.json");
-            JsonObject lang = assets.containsKey(langPath) ? JsonParser.parseString(new String(assets.get(langPath), StandardCharsets.UTF_8)).getAsJsonObject() : new JsonObject();
-            lang.addProperty((block ? "block." : "item.") + id.getNamespace() + "." + id.getPath().replace('/', '.'), name);
-            put(assets, langPath, lang, true);
+            translation(id, (block ? "block." : "item.") + id.getNamespace() + "." + id.getPath().replace('/', '.'), name);
         }
+    }
+    void translation(ResourceLocation id, String key, String name) {
+        ResourceLocation langPath = path(id.getNamespace() + ":lang/en_us.json");
+        JsonObject lang = assets.containsKey(langPath) ? JsonParser.parseString(new String(assets.get(langPath), StandardCharsets.UTF_8)).getAsJsonObject() : new JsonObject();
+        lang.addProperty(key, name); put(assets, langPath, lang, true);
+    }
+    void fluidAssets(StartupFluid fluid, JsonObject properties) {
+        JsonObject bucket = new JsonObject();
+        bucket.addProperty("texture", StartupRegistries.text(properties, "bucketTexture", "minecraft:item/water_bucket"));
+        if (properties.has("displayName")) {
+            String name = properties.get("displayName").getAsString();
+            translation(fluid.id, "fluid." + fluid.id.getNamespace() + "." + fluid.id.getPath().replace('/', '.'), name);
+            translation(fluid.bucketId, "item." + fluid.bucketId.getNamespace() + "." + fluid.bucketId.getPath().replace('/', '.'), name + " Bucket");
+        }
+        contentAssets(fluid.bucketId, bucket, false, false);
+        JsonObject state = new JsonObject(); state.add("variants", new JsonObject());
+        put(assets, path(fluid.id.getNamespace() + ":blockstates/" + fluid.id.getPath() + ".json"), state, false);
+        ResourceLocation atlasPath = path("minecraft:atlases/blocks.json");
+        JsonObject atlas = assets.containsKey(atlasPath) ? JsonParser.parseString(new String(assets.get(atlasPath), StandardCharsets.UTF_8)).getAsJsonObject() : new JsonObject();
+        JsonArray sources = atlas.has("sources") ? atlas.getAsJsonArray("sources") : new JsonArray();
+        for (ResourceLocation texture : List.of(fluid.stillTexture, fluid.flowingTexture)) {
+            JsonObject sprite = new JsonObject(); sprite.addProperty("type", "minecraft:single"); sprite.addProperty("resource", texture.toString());
+            if (!sources.contains(sprite)) sources.add(sprite);
+        }
+        atlas.add("sources", sources); put(assets, atlasPath, atlas, true);
     }
     @MantisExport public void lootTable(String id, Value value) {
         ResourceLocation key = new ResourceLocation(RecipeValues.id(id));

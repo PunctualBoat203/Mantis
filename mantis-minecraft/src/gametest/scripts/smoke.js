@@ -4,6 +4,26 @@ import { recipes } from 'minecraft:recipes';
 import { lifecycle } from 'mantis:lifecycle';
 import { test } from 'mantis_test:async';
 import { server } from 'minecraft:server';
+import { commands } from 'minecraft:commands';
+
+commands.register('mantis:sum', { permission: 2, arguments: [
+  { name: 'base', type: 'integer', min: 1, max: 10 },
+  { name: 'extra', type: 'double', min: 0, max: 10, optional: true }
+] }, event => {
+  if (!test.onServerThread() || event.source.player() !== null || event.source.dimension() !== 'minecraft:overworld'
+      || !event.source.hasPermission(2) || event.source.name().length === 0) throw new Error('Command source binding failed');
+  return event.args.base + Math.round(event.args.extra ?? 0);
+});
+commands.register('mantis:echo', { permission: 0, arguments: [
+  { name: 'message', type: 'string', optional: true, suggestions: ['first', 'second'] }
+] }, event => { event.source.reply(event.args.message ?? 'empty'); test.mark('command'); });
+commands.register('mantis:flag', { permission: 2, arguments: [{ name: 'enabled', type: 'boolean' }] }, event => event.args.enabled ? 7 : 8);
+commands.register('mantis:words', { permission: 2, arguments: [{name:'item',type:'word'}, {name:'text',type:'greedy'}] }, event => {
+  if (event.args.item !== 'stone' || event.args.text !== 'hello world') throw new Error('Command words lost their value');
+  return 9;
+});
+commands.register('mantis:bad_return', { permission: 2 }, () => 'bad');
+commands.register('mantis:obsolete', {permission:2}, () => 3);
 
 test.hold();
 test.load().then(data => {

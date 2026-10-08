@@ -54,6 +54,7 @@ public final class Mantis {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::setup);
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::register);
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::packs);
+        FMLJavaModLoadingContext.get().getModEventBus().addListener(registries::tabContents);
         MinecraftForge.EVENT_BUS.addListener(this::reloadListeners);
         MinecraftForge.EVENT_BUS.addListener(this::started);
         MinecraftForge.EVENT_BUS.addListener(this::stopping);
@@ -66,6 +67,7 @@ public final class Mantis {
     private void setup(FMLLoadCompleteEvent event) {
         event.enqueueWork(() -> {
             prepareStartup();
+            registries.validateReferences();
             MantisApi.freeze();
         });
     }
@@ -109,6 +111,7 @@ public final class Mantis {
         if (instance == null || instance.engine == null) throw new IllegalStateException("Mantis has not initialized its script engine");
         return instance.engine;
     }
+    static StartupRegistries startupRegistries() { return instance.registries; }
     public static MantisConfig config() { return instance == null || instance.config == null ? MantisConfig.DEFAULT : instance.config; }
     /** True once a script generation has been activated, meaning a failed reload has something to fall back to. */
     public static boolean hasActive() { return instance != null && instance.active != null; }
@@ -124,7 +127,9 @@ public final class Mantis {
     }
 
     private void reloadListeners(AddReloadListenerEvent event) {
-        ((RecipeScripts) event.getServerResources().getRecipeManager()).mantis$conditionContext(event.getConditionContext());
+        RecipeScripts recipes = (RecipeScripts) event.getServerResources().getRecipeManager();
+        recipes.mantis$conditionContext(event.getConditionContext());
+        recipes.mantis$commandDispatcher(event.getServerResources().getCommands().getDispatcher());
     }
 
     private void started(ServerStartedEvent event) { adopt(event.getServer(), false); }
@@ -147,6 +152,7 @@ public final class Mantis {
         }
         ScriptScheduler scheduler = ScriptScheduler.of(server::execute, server::isSameThread);
         next.session().start(scheduler, reload);
+        server.getPlayerList().getPlayers().forEach(server.getCommands()::sendCommands);
         if (instance.startup != null) instance.startup.start(scheduler, false);
         instance.emit(reload ? "server.reloaded" : "server.started", Map.of("ticks", instance.clock.ticks()));
         log("Loaded " + next.session().scriptCount() + " server scripts");

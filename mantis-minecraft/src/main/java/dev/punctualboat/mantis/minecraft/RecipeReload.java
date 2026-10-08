@@ -1,6 +1,8 @@
 package dev.punctualboat.mantis.minecraft;
 
 import com.google.gson.*;
+import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.commands.CommandSourceStack;
 import dev.punctualboat.mantis.minecraft.api.MantisApi;
 import dev.punctualboat.mantis.recipes.*;
 import dev.punctualboat.mantis.runtime.*;
@@ -18,24 +20,31 @@ public final class RecipeReload {
     private RecipeReload() {}
 
     public static PreparedScripts prepare(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions) {
-        return prepare(jsons, conditions, Mantis.config().lenientFirstLoad() && !Mantis.hasActive());
+        return prepare(jsons, conditions, null);
+    }
+    public static PreparedScripts prepare(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions, CommandDispatcher<CommandSourceStack> dispatcher) {
+        return prepare(jsons, conditions, dispatcher, Mantis.config().lenientFirstLoad() && !Mantis.hasActive());
     }
 
     static PreparedScripts prepare(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions, boolean lenient) {
+        return prepare(jsons, conditions, null, lenient);
+    }
+    private static PreparedScripts prepare(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions, CommandDispatcher<CommandSourceStack> dispatcher, boolean lenient) {
         Mantis.discardPending();
         if (lenient) {
-            try { return build(jsons, conditions, false); }
+            try { return build(jsons, conditions, dispatcher, false); }
             catch (RuntimeException error) {
                 Mantis.report(error);
                 Mantis.log("Server scripts failed to load and were skipped, so no scripted recipe changes were applied. Fix the error, then run /mantis reload.");
             }
-            return build(jsons, conditions, true);
+            return build(jsons, conditions, dispatcher, true);
         }
-        return build(jsons, conditions, false);
+        return build(jsons, conditions, dispatcher, false);
     }
 
-    private static PreparedScripts build(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions, boolean skipScripts) {
+    private static PreparedScripts build(Map<ResourceLocation, JsonElement> jsons, ICondition.IContext conditions, CommandDispatcher<CommandSourceStack> dispatcher, boolean skipScripts) {
         RecipesApi[] recipes = new RecipesApi[1];
+        ScriptCommands[] commands = new ScriptCommands[1];
         ScriptSession session;
         try {
             Map<String, String> sources = skipScripts ? Map.<String, String>of() : ScriptSources.load(ScriptDirectories.SERVER);
@@ -43,6 +52,8 @@ public final class RecipeReload {
                     Mantis::log, Mantis::report, registrar -> {
                 recipes[0] = new RecipesApi(registrar.context(), MantisApi.recipeSchemas());
                 registrar.module("minecraft:recipes", Map.of("recipes", recipes[0]));
+                commands[0] = new ScriptCommands(registrar);
+                registrar.module("minecraft:commands", Map.of("commands", commands[0]));
                 registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
                 registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
                 MinecraftBindings.register(registrar);
@@ -50,7 +61,7 @@ public final class RecipeReload {
             });
         } catch (IOException error) { throw new IllegalStateException("Could not read server scripts", error); }
 
-        PreparedScripts prepared = new PreparedScripts(session, recipes[0]);
+        PreparedScripts prepared = new PreparedScripts(session, recipes[0], commands[0]);
         try {
             Map<String, JsonObject> originals = new TreeMap<>();
             jsons.forEach((id, json) -> { if (json.isJsonObject() && !id.getPath().startsWith("_")) originals.put(id.toString(), json.getAsJsonObject()); });
@@ -65,6 +76,8 @@ public final class RecipeReload {
             recipes[0].begin(transaction);
             try { session.events().emitStrict("recipes", recipes[0]); }
             finally { recipes[0].end(); }
+            commands[0].freeze();
+            if (dispatcher != null) commands[0].validate(dispatcher);
 
             RecipeTransaction.Changes changes = transaction.commitChanges((id, json) -> {
                 ResourceLocation location = new ResourceLocation(id);
@@ -75,6 +88,7 @@ public final class RecipeReload {
                 } catch (RuntimeException error) { throw new IllegalArgumentException("Invalid scripted recipe " + id + ": " + error.getMessage(), error); }
             });
 
+            if (dispatcher != null) commands[0].install(dispatcher);
             changes.replacements().forEach((id, json) -> jsons.put(new ResourceLocation(id), json));
             changes.removed().forEach(id -> jsons.remove(new ResourceLocation(id)));
             Mantis.pending(prepared);
