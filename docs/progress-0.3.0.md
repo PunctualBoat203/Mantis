@@ -2,7 +2,7 @@
 
 Creator: **PunctualBoat**. Target: Minecraft Forge 1.20.1, Java 17.
 
-This pass targets roughly 70% of a practical first release: a usable scripting runtime, internal clock, generic recipe editing, convenient recipe builders, basic startup content, server gameplay events, and generated pack data. The percentage is a scope estimate. The original broad mod-support goal also requires installed-mod and modpack testing.
+This pass brings Mantis to roughly 70% of a practical first release: a usable scripting runtime, internal clock, generic recipe editing, convenient recipe builders, basic startup content, server gameplay events, and generated pack data. The percentage is a scope estimate. The original broad mod-support goal also requires installed-mod and modpack testing.
 
 | Area | Delivered in 0.3.0 | Remaining |
 | --- | --- | --- |
@@ -20,4 +20,14 @@ The generic recipe path applies to mods that use RecipeManager and registered se
 
 Startup declarations run before Forge registry events and freeze after loading. Both sides must share content declarations. Startup errors stop mod loading. Server script failures keep the previous generation; the first server load can fall back to an empty generation according to configuration. Startup resources require a restart to change.
 
-Verification is tracked by the build workflow: unit tests, the Forge mod build, generated-resource and gameplay GameTests, rejected and successful reloads, first-load recovery, and benchmark smoke checks. Benchmark smoke verifies execution only. The local unit suite currently passes 86 tests; final server verification is recorded after CI completes.
+Verified on Forge 47.4.0 / Java 17 in [CI run 37766955492](https://github.com/PunctualBoat203/Mantis/actions/runs/37766955492), code commit `eaa061c05596ea4d857874e0aed321284ec6a25a`:
+
+- 86 unit tests passed, with zero failures or skipped tests.
+- Both required Minecraft GameTests passed in the normal run.
+- Both required Minecraft GameTests passed again with deliberate first-load failure and recovery.
+- The Forge mod build and benchmark smoke checks passed.
+- The bundled JAR contains 99 Mantis classes and six disabled examples, with no GameTest classes or supplied reference-mod binaries.
+
+The GameTests exercise generated-resource validation/metadata, startup content and tags/loot, vanilla/custom recipe builders, semantic replacements, gameplay bindings/cancellation, player data cloning, async ownership, rejected and successful reloads, and persisted clock data. Client JSON resources were inspected through PackResources; a visual client and multiplayer test remain pending. Benchmark smoke verifies execution only.
+
+Bundled JAR SHA-256: `36e910f8e0672be68fbb0a0ea3c422d8a45dfd1f47075b04e1eeca97c20b4ce2`.
