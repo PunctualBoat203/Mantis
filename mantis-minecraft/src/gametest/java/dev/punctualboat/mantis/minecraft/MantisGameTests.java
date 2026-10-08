@@ -45,6 +45,38 @@ import java.util.concurrent.CompletableFuture;
 @PrefixGameTestTemplate(false)
 public final class MantisGameTests {
     @GameTest(templateNamespace = "mantis", template = "empty")
+    public static void commandDeclarationsValidateAndRelease(GameTestHelper helper) {
+        ScriptCommands[] commands = new ScriptCommands[1];
+        try (var session = new dev.punctualboat.mantis.runtime.ScriptSession(Mantis.engine(), Map.of(), null,
+                text -> {}, error -> { throw new IllegalStateException(error); }, registrar -> commands[0] = new ScriptCommands(registrar))) {
+            var handler = session.context().evaluate("handler", "() => 1");
+            for (String options : List.of("({permission:1.5})", "({permission:5})", "({unknown:true})",
+                    "({arguments:[{name:'value',type:'integer',min:3,max:1}]})",
+                    "({arguments:[{name:'value',type:'word',optional:true},{name:'other',type:'word'}]})",
+                    "({arguments:[{name:'value',type:'greedy'},{name:'other',type:'word'}]})",
+                    "({arguments:[{name:'value',type:'boolean',suggestions:['true']}]})",
+                    "({arguments:[{name:'value',type:'word'},{name:'value',type:'word'}]})")) {
+                boolean rejected = false;
+                try { commands[0].register("mantis:validation", session.context().evaluate("options", options), handler); }
+                catch (IllegalArgumentException expected) { rejected = true; }
+                helper.assertTrue(rejected && session.ownedResources() == 0, "Invalid declarations must reject without retaining callbacks: " + options);
+            }
+            var options = session.context().evaluate("options", "({permission:0})");
+            commands[0].register("mantis:validation", options, handler);
+            boolean rejected = false;
+            try { commands[0].register("mantis:validation", options, handler); } catch (IllegalArgumentException expected) { rejected = true; }
+            helper.assertTrue(rejected && session.ownedResources() == 1, "Duplicate commands must not retain a second callback");
+            commands[0].freeze(); rejected = false;
+            try { commands[0].register("mantis:late", options, handler); } catch (IllegalStateException expected) { rejected = true; }
+            helper.assertTrue(rejected, "Late command declarations must reject after preparing");
+            var dispatcher = new CommandDispatcher<CommandSourceStack>(); commands[0].install(dispatcher);
+            helper.assertTrue(dispatcher.getRoot().getChild("mantis:validation").canUse(helper.getLevel().getServer().createCommandSourceStack()), "Valid declarations must install");
+            session.close();
+            helper.assertTrue(session.ownedResources() == 0 && !dispatcher.getRoot().getChild("mantis:validation").canUse(helper.getLevel().getServer().createCommandSourceStack()), "Closing a generation must invalidate retained command nodes");
+        }
+        helper.succeed();
+    }
+    @GameTest(templateNamespace = "mantis", template = "empty")
     public static void generatedResourcesValidateAndFreeze(GameTestHelper helper) {
         StartupData data = new StartupData(); StartupRegistries registry = new StartupRegistries(data);
         try (var context = Mantis.engine().createContext(Map.of(), Map.of())) {
@@ -87,7 +119,9 @@ public final class MantisGameTests {
                 helper.assertTrue(read(server, PackType.SERVER_DATA, "mantis:tags/items/inspection.json").getAsJsonArray("values").size() == 2, "Repeated tag declarations must append values");
                 helper.assertTrue(server.getResource(PackType.CLIENT_RESOURCES, new ResourceLocation("mantis:models/item/inspection.json")) == null, "Server data pack must not expose client resources");
                 List<ResourceLocation> listed = new ArrayList<>(); assets.listResources(PackType.CLIENT_RESOURCES, "mantis", "models/item", (id, value) -> listed.add(id));
-                helper.assertTrue(listed.size() == 2, "Pack listing must include both item models under the requested path");
+                helper.assertTrue(new HashSet<>(listed).equals(Set.of(new ResourceLocation("mantis:models/item/inspection.json"),
+                        new ResourceLocation("mantis:models/item/inspection_block.json"), new ResourceLocation("mantis:models/item/inspection_fluid_bucket.json"))),
+                        "Pack listing must include item, block-item and fluid-bucket models under the requested path");
             }
             rejected = false;
             try { data.tag("items", "mantis:late", context.evaluate("late", "[]")); }

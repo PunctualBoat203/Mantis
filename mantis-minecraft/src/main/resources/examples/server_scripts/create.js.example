@@ -1,0 +1,12 @@
+import { mods } from 'minecraft:mods';
+import { events } from 'mantis:events';
+import { recipes } from 'minecraft:recipes';
+
+if (mods.isLoaded('create')) events.on('recipes', () => {
+  recipes.replaceInput({id: 'create:mixing/andesite_alloy'}, 'minecraft:andesite', 'minecraft:stone');
+  recipes.set({id: 'create:crushing/iron_ore'}, '/processingTime', 100);
+  recipes.custom('pack:mix_iron', {
+    type: 'create:mixing', ingredients: [{item: 'minecraft:stone'}, {item: 'minecraft:iron_nugget'}],
+    results: [{item: 'minecraft:iron_ingot'}], heatRequirement: 'heated'
+  });
+});

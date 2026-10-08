@@ -4,7 +4,7 @@ Minecraft 1.20.1 scripting by **PunctualBoat**. Java 17, Forge 47.4.0 or newer i
 
 Mantis owns script loading, modules, events, reload cleanup, Java bindings, type conversion, async scheduling, an internal clock, and recipe edits. It uses bundled GraalJS 23.0.12 for JavaScript execution. The mod has no Rhino, KubeJS, or HeroClock dependency. Comparative benchmarks live in a separate development module; performance depends on the workload and JVM.
 
-Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.3.0.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`.
+Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.4.0.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`.
 
 On first launch Mantis creates:
 
@@ -18,7 +18,7 @@ config/mantis/
     server_scripts/
 ```
 
-Startup scripts run once before Forge fills its registries and require a game restart to change. They declare items, blocks, recipe schemas, generated tags/loot, and JSON assets. Registry declarations must match between clients and servers. Startup errors fail mod loading; the lenient first-load fallback applies only to server scripts. Fluid registration is still pending. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
+Startup scripts run once before Forge fills its registries and require a game restart to change. They declare items, blocks, fluids, creative tabs, recipe schemas, generated tags/loot, and JSON assets. Registry declarations must match between clients and servers. Startup errors fail mod loading; the lenient first-load fallback applies only to server scripts. Server scripts run once per datapack load. `.js` and `.mjs` files load in filename order as ES modules; relative imports work within their script directory. Examples end in `.js.example` and never run automatically. Copy an example into its matching script directory and remove `.example` to enable it. Existing files are preserved.
 
 ## Scripts
 
@@ -127,11 +127,47 @@ data.lootTable('pack:chests/token', {
 });
 ```
 
-Item properties are `maxStackSize`, `durability`, `fireResistant`, `food: {nutrition, saturation, alwaysEat}`, `texture`, and `displayName`. Durable items stack to one. Block properties are `hardness`, `resistance`, `light`, `noOcclusion`, `requiresTool`, `item` (automatic block item, default true), `texture`, and `displayName`. Unknown properties and duplicate IDs fail. Use a custom namespace for new entries. Items get generated models using their texture; blocks get cube models, blockstates and optional block-item models. Default textures are paper/stone. `displayName` creates English translations. New creative tabs and block/item behavioral subclasses are not yet provided.
+Item properties are `maxStackSize`, `durability`, `fireResistant`, `food: {nutrition, saturation, alwaysEat}`, `texture`, and `displayName`. Durable items stack to one. Block properties are `hardness`, `resistance`, `light`, `noOcclusion`, `requiresTool`, `item` (automatic block item, default true), `texture`, and `displayName`. Unknown properties and duplicate IDs fail. Use a custom namespace for new entries. Items get generated models using their texture; blocks get cube models, blockstates and optional block-item models. Default textures are paper/stone. `displayName` creates English translations. Custom block/item behavioral subclasses are not yet provided.
+
+```js
+const sap = registries.fluid('pack:sap', {
+  displayName: 'Sap', tint: '#CC88BB44', viscosity: 1500, tickRate: 8
+});
+data.tag('fluids', 'pack:sap', [sap.source, sap.flowing]);
+registries.creativeTab('pack:content', {
+  displayName: 'Pack Content', icon: sap.bucket,
+  items: ['pack:token', 'pack:stone', sap.bucket], after: ['minecraft:ingredients']
+});
+registries.tabItems('minecraft:ingredients', ['pack:token', sap.bucket]);
+```
+
+`fluid` returns IDs for `source`, `flowing`, `block`, and `bucket`. `pack:sap` creates a fluid type/source/liquid block at that ID, `pack:flowing_sap`, and `pack:sap_bucket`. Families reserve their generated IDs and connect through suppliers, independent of registry event order. Properties include `density` (default 1000), `viscosity` (1000), `temperature` (300 kelvin), `light` (0–15), `tickRate` (5), `slopeFindDistance` (4), `levelDecreasePerBlock` (1), `resistance` (100), and booleans `canConvertToSource`, `canExtinguish`, `canHydrate`, `supportsBoating` (all default false). Fluids use Forge's flowing-fluid behavior. `stillTexture` / `flowingTexture` default to vanilla water sprites; `tint` is an ARGB string, default `#FFFFFFFF`. Sprite declarations are added to the block atlas and fluids use the translucent render layer. `bucketTexture` defaults to the vanilla water-bucket icon and is independent of the fluid tint. Custom textures must come from a resource pack or installed mod.
+
+`creativeTab` accepts `displayName`, `icon` (item ID), `items` (item IDs), and optional `before` / `after` arrays of tab IDs. `tabItems` appends IDs to an existing or scripted tab, removing repeated IDs. Item and tab references are checked after registry loading. Tab callbacks use stored Java declarations rather than retaining script callbacks. Registry declarations are capped at 4096 entries; a fluid family counts as four declarations. Lists of creative item IDs are capped at 4096.
 
 Generated resources are in-memory packs. `data.tag` accepts a relative tag folder (`items`, `blocks`, `fluids`, `entity_types`, `game_events`, or e.g. `worldgen/biome`), a tag ID, and values consisting of IDs, `#tag` references, or `{id, required}` entries. Repeated declarations append; `replace: true` replaces earlier values and lower-priority pack values. `data.lootTable` writes a complete loot table. `data.json('pack:relative/path.json', object)` supplies other server JSON, including predicates, advancements or mod data, subject to that loader's schema. `data.assetJson` supplies or overrides client JSON such as models and translations. Textures must already exist in Minecraft or an installed resource pack/mod. Data and assets are limited to 4096 resources total, 1 MiB per resource and 16 MiB total.
 
 Startup resources are frozen and reused during `/reload`; changing them requires a restart. Their installed loaders validate the JSON. The generated packs default to the top position; operator pack ordering can affect overriding. Runtime loot-drop modifiers and server-script tag generation are still pending.
+
+## Script commands
+
+Declare commands at the top level of a server script, or during its load/init/recipe events. Declarations freeze when that reload finishes preparing. Each command belongs to that script generation; removed declarations disappear after a successful reload. Name collisions with vanilla/mod commands reject the reload. A rejected reload retains the previous dispatcher and handlers.
+
+```js
+import { commands } from 'minecraft:commands';
+
+commands.register('pack:welcome', {
+  permission: 0,
+  arguments: [{name: 'message', type: 'string', optional: true}]
+}, event => {
+  event.source.reply(event.args.message ?? 'Welcome!');
+  return 1;
+});
+```
+
+Use `/pack:welcome "Hello world"`. Permission defaults to 2 and accepts integers 0–4. Argument types are `integer`, `double`, `boolean`, `word`, `string` (quoted or one word), and `greedy` (remaining text). Numeric arguments accept `min` / `max`; string types accept static `suggestions`. Optional arguments must follow required arguments and a greedy argument must be last. Missing optional values are `null`. Names are lowercase literals, optionally namespaced, and `mantis` is reserved. There are at most 512 commands, 16 arguments per command and 256 suggestions per argument. Nested literal subcommands and Minecraft entity/position arguments are not yet provided.
+
+Handlers receive `args`, the original command `input`, and `source`. Source helpers are `name()`, `reply(message)`, `error(message)`, `hasPermission(level)`, `player()` (null for console/command blocks), and `dimension()`. Operations execute on the server thread. Return an integer result, or omit the return for result 1. Errors report result 0; ten consecutive callback/return-validation failures disable and release that handler. A success resets the counter. Command callbacks include argument conversion and result validation in the callback execution budget; exceeding an execution limit closes all work owned by that generation. Reload after fixing the error.
 
 ## Modules and events
 
@@ -145,7 +181,8 @@ Startup resources are frozen and reused during `/reload`; changing them requires
 | `minecraft:recipes` | `recipes` |
 | `minecraft:mods` | `mods.isLoaded(modId)` |
 | `minecraft:server` | `server.broadcast(message)`, `runCommand(command)`, `players()`, `level(dimension)` |
-| `minecraft:registries` | Startup-only `registries.item(id, properties)` / `block(id, properties)` |
+| `minecraft:registries` | Startup-only `registries.item`, `block`, `fluid`, `creativeTab`, `tabItems` |
+| `minecraft:commands` | Server-only `commands.register(name, options, handler)` |
 | `minecraft:schemas` | Startup-only `schemas.register(type, definition)` |
 | `minecraft:data` | Startup-only `data.tag(folder, id, values, replace = false)`, `lootTable(id, json)`, `json(path, json)`, `assetJson(path, json)` |
 
@@ -224,3 +261,7 @@ An exception in an event handler or repeating timer is logged and the handler st
 `./gradlew :mantis-minecraft:runGameTestServer` runs isolated Minecraft tests of startup items/blocks/food, generated tags/loot/assets and pack metadata, vanilla/schema recipe builders, tag-aware replacements, event filtering/cancellation/damage changes, player data cloning, recipe edits, rejected reloads, timer/future cleanup, server-thread async continuations, Minecraft type conversion, lifecycle hooks, and saved clock data. A registered custom non-crafting serializer verifies nested fusion energy, catalyst/output arrays, ritual fields, and preservation of opaque metadata across reloads. This fixture verifies the generic serializer path; installed Draconic Evolution/Occultism compatibility remains untested. Test scripts, serializers, and structures stay out of the release JAR.
 
 `./gradlew :mantis-minecraft:runGameTestServer -PtestFirstLoad` also starts with a deliberately broken server script, verifies unchanged recipes and an empty fallback generation, then removes the broken script and recovers through reload. Both runs check that an extension-registration failure is skipped only by the first-load fallback and rejected by strict reloads.
+
+The same GameTests exercise command permissions, all supported argument types, optional values, suggestions, return validation, collisions, removed declarations, and callback cleanup through reloads. They register fluid families and creative tabs, place and collect fluids, inspect bucket remainders and generated fluid assets, and build tab contents including additions to existing tabs. A visual client test is still needed.
+
+`./gradlew :mantis-minecraft:runGameTestServer -PtestCreate` installs Create 6.0.8 (matching Maven build 289), Ponder, Flywheel, Registrate and MixinExtras only for development tests. It checks edits to existing mixing/crushing recipes, chance preservation, removals, and seven installed processing serializers, including filling and emptying with a Mantis fluid. These mods are not bundled with Mantis. This version-specific check does not establish compatibility with all Create releases or other recipe systems. The generic serializer fixture remains the only fusion/ritual test; installed Draconic Evolution and Occultism remain untested.

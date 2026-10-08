@@ -1,0 +1,9 @@
+import { commands } from 'minecraft:commands';
+
+commands.register('pack:welcome', {
+  permission: 0,
+  arguments: [{name: 'message', type: 'string', optional: true, suggestions: ['hello', 'welcome']}]
+}, event => {
+  event.source.reply(event.args.message ?? 'Welcome!');
+  return 1;
+});

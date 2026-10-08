@@ -7,6 +7,13 @@ registries.item('pack:token', {
 registries.block('pack:stone', {
   displayName: 'Pack Stone', texture: 'minecraft:block/stone', hardness: 2, resistance: 6
 });
+const sap = registries.fluid('pack:sap', {displayName: 'Sap', tint: '#CC88BB44', viscosity: 1500});
+data.tag('fluids', 'pack:sap', [sap.source, sap.flowing]);
+registries.creativeTab('pack:content', {
+  displayName: 'Pack Content', icon: sap.bucket,
+  items: ['pack:token', 'pack:stone', sap.bucket], after: ['minecraft:ingredients']
+});
+registries.tabItems('minecraft:ingredients', ['pack:token', sap.bucket]);
 data.tag('items', 'pack:tokens', ['pack:token']);
 data.lootTable('pack:chests/token', {
   type: 'minecraft:chest',
