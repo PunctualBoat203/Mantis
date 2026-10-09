@@ -22,7 +22,16 @@ This patch release addresses concrete 0.4.0 defects and adds checks for Windows 
 | C2/C6: tag replacement and command permission | Existing behavior is stated explicitly in the README. |
 | Third-party notices | Release resources include UPL, GraalJS component and ICU4J license texts, plus an inventory of the five embedded libraries. |
 
-Local verification passed 96 Java unit tests using the real GraalJS/Gson dependencies and Java 17, with no failures or skips. Forge, Windows and production-server checks are run in CI; results must be checked before treating this as a verified release.
+Verified on Forge 47.4.0 / Java 17 in [CI run 37888898318](https://github.com/PunctualBoat203/Mantis/actions/runs/37888898318), implementation commit `3c9afb7ca605e0332356fb1dff2f46e07fda1dcf`:
+
+- All 96 Java unit tests passed on Ubuntu and Windows, with zero failures or skips. The local Java 17 run passed the same 96 tests.
+- All three required Forge GameTests passed in each of the normal, first-load failure/recovery and installed Create runs (nine passing executions).
+- Those runs include failed startup gameplay sessions, degraded operator commands, unloaded chunk rejection, block placement into fluids, script-issued reload rejection, late reload-listener failure, back-to-back loads and nested overlapping loads.
+- The bundled reobfuscated JAR booted in a separately installed Forge server, registered startup items/fluids, edited recipes, retained native console levels and completed three reloads with usable command callbacks and one timer.
+- The benchmark smoke checks passed; they check execution and do not establish new performance results.
+- The release JAR contains 113 Mantis classes, eight disabled examples, four notice/license resources and five embedded JavaScript runtime libraries. Test classes, benchmark classes and reference/installed-mod binaries are excluded. Artifact SHA-256 digests match GitHub's metadata.
+
+Bundled JAR SHA-256: `9891561b8bf60d6c6512da2f6705beee16ddecfcb516040448d2a548130c2940`.
 
 The following review concerns remain separate work: a long-running heap/metaspace soak and interface-proxy retention; large guest allocations and regex interruption; interface annotation/export diagnostics; resource-scope cleanup complexity; creative ordering and optional content references; server-only mode and client content hashes; KubeJS coexistence; more installed-mod schemas; block loot/tool/render defaults; event payload allocation profiling; completion declarations and slow-handler diagnostics; build plugin pinning and multiplayer/client checks. None is claimed resolved by the added short reload test.
 

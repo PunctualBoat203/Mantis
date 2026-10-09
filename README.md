@@ -4,7 +4,7 @@ Minecraft 1.20.1 scripting by **PunctualBoat**. Java 17, Forge 47.4.0 or newer i
 
 Mantis owns script loading, modules, events, reload cleanup, Java bindings, type conversion, async scheduling, an internal clock, and recipe edits. It uses bundled GraalJS 23.0.12 for JavaScript execution. The mod has no Rhino, KubeJS, or HeroClock dependency. Comparative benchmarks live in a separate development module; performance depends on the workload and JVM.
 
-Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.4.1.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`.
+Build with `./gradlew test :mantis-minecraft:build`. The bundled mod is `mantis-minecraft/build/libs/mantis-0.4.1.jar`. Launch development Minecraft with `:mantis-minecraft:runClient` or `:mantis-minecraft:runServer`. See the [0.4.1 review follow-up](docs/review-follow-up-0.4.1.md) for fixes, verified checks and remaining review work.
 
 On first launch Mantis creates:
 
