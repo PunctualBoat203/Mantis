@@ -32,7 +32,7 @@ public record RecipeFilter(String id, String type, String mod, JsonElement input
     public boolean matches(String recipeId, JsonObject json) { return matches(recipeId, json, DEFAULT, (tag, item) -> false); }
     public boolean matches(String recipeId, JsonObject json, RecipeSchemas schemas, RecipeMatcher.TagLookup tags) {
         return (id == null || id.equals(recipeId))
-                && (type == null || json.has("type") && type.equals(json.get("type").getAsString()))
+                && (type == null || type.equals(RecipeMatcher.serializer(json)))
                 && (mod == null || recipeId.length() > mod.length() && recipeId.charAt(mod.length()) == ':' && recipeId.startsWith(mod))
                 && (input == null || RecipeMatcher.matchesRole(json, "input", input, schemas, tags))
                 && (output == null || RecipeMatcher.matchesRole(json, "output", output, schemas, tags))

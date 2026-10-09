@@ -1,6 +1,9 @@
 import { registries } from 'minecraft:registries';
 import { schemas } from 'minecraft:schemas';
 import { data } from 'minecraft:data';
+import { events } from 'mantis:events';
+
+events.once('mantis.test.fail_startup', () => { while (true) {} });
 
 registries.item('mantis:script_item', { maxStackSize: 16, fireResistant: true, texture: 'minecraft:item/emerald', displayName: 'Script Item' });
 registries.item('mantis:script_food', { food: { nutrition: 3, saturation: 0.5, alwaysEat: true } });

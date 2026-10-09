@@ -189,7 +189,7 @@ public final class HostBindings implements AutoCloseable {
                 int fixed = call.varargs() ? call.types().length - 1 : call.types().length;
                 for (int i = 0; i < fixed; i++) converted[i + offset] = conversions.fromScript(arguments[i], call.types()[i]);
                 if (call.varargs()) {
-                    if (arguments.length == call.types().length && arguments[fixed].hasArrayElements())
+                    if (call.raw()[fixed].getComponentType() != Value.class && arguments.length == call.types().length && arguments[fixed].hasArrayElements())
                         converted[fixed + offset] = conversions.fromScript(arguments[fixed], call.types()[fixed]);
                     else {
                         Class<?> component = call.raw()[fixed].getComponentType();
@@ -212,7 +212,7 @@ public final class HostBindings implements AutoCloseable {
             if (arguments.length < fixed || !method.varargs() && arguments.length != fixed) continue;
             int score = method.varargs() ? 20 : 0;
             for (int i = 0; i < arguments.length; i++) {
-                Type target = i < fixed ? method.types()[i] : arguments.length == method.types().length && arguments[i].hasArrayElements()
+                Type target = i < fixed ? method.types()[i] : method.raw()[fixed].getComponentType() != Value.class && arguments.length == method.types().length && arguments[i].hasArrayElements()
                         ? method.types()[fixed] : method.raw()[fixed].getComponentType();
                 int cost = cost(arguments[i], target);
                 if (cost == Integer.MAX_VALUE) { score = cost; break; }

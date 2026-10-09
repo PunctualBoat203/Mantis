@@ -22,6 +22,7 @@ public final class MantisContext implements AutoCloseable {
     private boolean closed;
     private long invocations, executionNanos, moduleHits, moduleMisses;
     private int depth;
+    private volatile Thread executingThread;
 
     public record ModuleStats(long hits, long misses, List<String> loaded) {}
 
@@ -47,9 +48,15 @@ public final class MantisContext implements AutoCloseable {
             helpers = run("initialize", limits.load(), () -> context.eval(sourceCache.get("mantis:values", """
                 (() => {
                   const parse = JSON.parse, stringify = JSON.stringify, PromiseType = Promise, ErrorType = Error;
-                  const from = Array.from, assign = Object.assign, create = Object.create, BigIntType = BigInt;
+                  const from = Array.from, assign = Object.assign, create = Object.create, BigIntType = BigInt, StringType = String;
                   return { parse, stringify, array: a => from(a), object: o => assign(create(null), o),
-                    bigint: value => BigIntType(value), promise: executor => new PromiseType(executor), error: message => new ErrorType(message) };
+                    bigint: value => BigIntType(value), promise: executor => new PromiseType(executor), error: message => new ErrorType(message),
+                    consoleText: value => {
+                      if (typeof value === 'object' && value !== null) {
+                        try { const text = stringify(value); if (text !== undefined) return text; } catch (_) {}
+                      }
+                      try { return StringType(value); } catch (_) { return '<unprintable>'; }
+                    } };
                 })()
                 """, null, false)));
             Map<String, Object> bindings = new LinkedHashMap<>();
@@ -69,9 +76,9 @@ public final class MantisContext implements AutoCloseable {
         if (cached != null) { moduleHits++; return cached; }
         moduleMisses++;
         Path path = ModuleFiles.scriptPath(name);
-        String entry = "import * as namespace from '" + path.toUri().toASCIIString() + "'; export {namespace}; export const initialized = true;";
+        String entry = "import * as namespace from '" + path.toUri().toASCIIString().replace("'", "%27") + "'; export {namespace}; export const initialized = true;";
         Source source = sourceCache.get(name + " [entry]", entry,
-                Path.of("/mantis/entries").resolve(name).toUri(), true);
+                ModuleFiles.ROOT.resolve("entries").resolve(name).toUri(), true);
         Value value = run("module:" + name, limits.load(), () -> {
             Value exports = context.eval(source);
             try {
@@ -111,6 +118,7 @@ public final class MantisContext implements AutoCloseable {
 
     public Value parseJson(String json) { return access("json:parse", () -> helpers.getMember("parse").execute(json)); }
     public String toJson(Value value) { return access("json:stringify", () -> helpers.getMember("stringify").execute(value).asString()); }
+    public String consoleText(Value value) { return access("console:format", () -> helpers.getMember("consoleText").execute(value).asString()); }
     public Value value(Object object) { return access("convert:value", () -> context.asValue(object)); }
     public Value array(Object... items) {
         return access("convert:array", () -> helpers.getMember("array").execute(ProxyArray.fromArray(items)));
@@ -135,6 +143,7 @@ public final class MantisContext implements AutoCloseable {
         if (depth > 0) return measure(operation, action);
         long start = System.nanoTime();
         long deadline = execution.begin(start, limit.toNanos());
+        executingThread = Thread.currentThread();
         depth++;
         long end = 0;
         boolean failed = true;
@@ -152,7 +161,7 @@ public final class MantisContext implements AutoCloseable {
             if (end == 0) end = System.nanoTime();
             execution.finish(deadline, end);
             diagnostics.record(operation, end - start, failed);
-            invocations++; executionNanos += end - start; depth--;
+            invocations++; executionNanos += end - start; depth--; executingThread = null;
             if (closed || execution.expired()) {
                 closed = true; execution.close(); context.close(true);
             }
@@ -164,6 +173,7 @@ public final class MantisContext implements AutoCloseable {
     public synchronized long invocations() { return invocations; }
     public synchronized long executionNanos() { return executionNanos; }
     public synchronized boolean isClosed() { return closed; }
+    public boolean isExecutingOnCurrentThread() { return executingThread == Thread.currentThread(); }
 
     public static ProxyObject readOnly(Map<String, Object> values) {
         Map<String, Object> copy = Collections.unmodifiableMap(new LinkedHashMap<>(values));

@@ -30,8 +30,15 @@ public final class RecipeMatcher {
         }
         return current;
     }
+    /** The recipe's serializer id, or null when "type" is missing or not a string (such recipes are skipped by vanilla too). */
+    static String serializer(JsonObject json) {
+        JsonElement type = json.get("type");
+        return type != null && type.isJsonPrimitive() && type.getAsJsonPrimitive().isString() ? type.getAsString() : null;
+    }
     public static boolean matchesRole(JsonObject json, String role, JsonElement selector, RecipeSchemas schemas, TagLookup tags) {
-        for (String path : schemas.paths(json.get("type").getAsString(), role)) if (matches(at(json, path), selector.getAsJsonObject(), tags, 0)) return true;
+        String type = serializer(json);
+        if (type == null) return false;
+        for (String path : schemas.paths(type, role)) if (matches(at(json, path), selector.getAsJsonObject(), tags, 0)) return true;
         return false;
     }
     private static boolean atom(JsonElement candidate, JsonObject selector, TagLookup tags) {
@@ -57,7 +64,9 @@ public final class RecipeMatcher {
         return false;
     }
     public static void replaceRole(JsonObject json, String role, JsonElement from, JsonElement replacement, RecipeSchemas schemas, TagLookup tags) {
-        for (String path : schemas.paths(json.get("type").getAsString(), role)) {
+        String type = serializer(json);
+        if (type == null) return;
+        for (String path : schemas.paths(type, role)) {
             JsonElement original = at(json, path);
             if (original != null) JsonPointer.set(json, path, replace(original, from.getAsJsonObject(), replacement, tags, 0));
         }

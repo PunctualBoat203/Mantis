@@ -12,6 +12,27 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ScriptSessionTest {
+    @Test void consoleAcceptsGuestValuesAndArgumentsAndPreservesLogLevels() {
+        List<String> messages = new ArrayList<>();
+        try (MantisEngine engine = new MantisEngine();
+             ScriptSession session = new ScriptSession(engine, Map.of("main.js", """
+                 import {console} from 'mantis:console';
+                 console.log(5);
+                 console.log({answer:42});
+                 console.log([1,2]);
+                 console.log('values', [3,4], true, null, undefined, 9n);
+                 console.log();
+                 console.warn('warning', {code:7});
+                 console.error('error', 8);
+                 const cycle = {}; cycle.self = cycle;
+                 console.log(cycle);
+                 console.log({toJSON(){throw Error('bad JSON')}, toString(){throw Error('bad string')}});
+                 """), null, (level, text) -> messages.add(level + ":" + text), error -> fail(error), registrar -> {}, true)) {
+            assertEquals(List.of("INFO:5", "INFO:{\"answer\":42}", "INFO:[1,2]", "INFO:values [3,4] true null undefined 9",
+                    "INFO:", "WARN:warning {\"code\":7}", "ERROR:error 8", "INFO:[object Object]", "INFO:<unprintable>"), messages);
+            assertTrue(session.recentErrors().isEmpty());
+        }
+    }
     @Test void filtersSkipGuestConversionAndPreserveOnceUntilAMatch() {
         List<String> calls = new ArrayList<>();
         AtomicInteger conversions = new AtomicInteger();

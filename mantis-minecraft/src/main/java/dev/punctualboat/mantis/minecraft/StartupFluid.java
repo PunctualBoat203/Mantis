@@ -6,6 +6,8 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.item.*;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.PushReaction;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 import net.minecraftforge.common.SoundActions;
 import net.minecraftforge.fluids.*;
@@ -67,7 +69,8 @@ final class StartupFluid {
         flowing = new ForgeFlowingFluid.Flowing(flowProperties);
         int light = StartupRegistries.integer(properties, "light", 0, 0, 15);
         float resistance = StartupRegistries.number(properties, "resistance", 100, 0, 100000);
-        block = new LiquidBlock(() -> source, BlockBehaviour.Properties.of().noCollission().strength(100, resistance).noLootTable().liquid().lightLevel(state -> light));
+        block = new LiquidBlock(() -> source, BlockBehaviour.Properties.of().replaceable().noCollission().strength(100, resistance)
+                .pushReaction(PushReaction.DESTROY).noLootTable().liquid().sound(SoundType.EMPTY).lightLevel(state -> light));
         bucket = new BucketItem(() -> source, new Item.Properties().craftRemainder(Items.BUCKET).stacksTo(1));
     }
 }

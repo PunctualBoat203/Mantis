@@ -24,6 +24,7 @@ public final class MantisEngine implements AutoCloseable {
     }
 
     public ExecutionLimits limits() { return limits; }
+    public boolean isExecutingOnCurrentThread() { return contexts.stream().anyMatch(MantisContext::isExecutingOnCurrentThread); }
     public String runtimeName() { return Truffle.getRuntime().getName(); }
 
     public record CacheStats(long hits, long misses, long evictions, int entries, long bytes) {}

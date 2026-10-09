@@ -7,6 +7,7 @@ import org.graalvm.polyglot.Value;
 import java.util.*;
 
 public final class JsonCodec {
+    private static final int MAX_NUMBER_DIGITS = 10_000;
     private JsonCodec() {}
     public static JsonElement read(Value value) { return read(value, new HashSet<>(), 0, new int[]{0}); }
     private static JsonElement read(Value value, Set<Value> path, int depth, int[] nodes) {
@@ -47,8 +48,14 @@ public final class JsonCodec {
             var p = json.getAsJsonPrimitive();
             if (p.isString()) return context.value(p.getAsString());
             if (p.isBoolean()) return context.value(p.getAsBoolean());
+            if (p.getAsString().length() > MAX_NUMBER_DIGITS + 16) throw new IllegalArgumentException("JSON number exceeds conversion limits");
+            var decimal = p.getAsBigDecimal();
+            if (decimal.signum() != 0 && (decimal.precision() > MAX_NUMBER_DIGITS || Math.abs((long) decimal.scale()) > MAX_NUMBER_DIGITS
+                    || (long) decimal.precision() - decimal.scale() > MAX_NUMBER_DIGITS)) {
+                throw new IllegalArgumentException("JSON number exceeds conversion limits");
+            }
             try {
-                var integer = p.getAsBigDecimal().toBigIntegerExact();
+                var integer = decimal.toBigIntegerExact();
                 return integer.abs().bitLength() <= 53 ? context.value(integer.longValue()) : context.bigInteger(integer.toString());
             } catch (ArithmeticException ignored) {
                 if (!Double.isFinite(p.getAsDouble())) throw new IllegalArgumentException("JSON numbers must be finite");

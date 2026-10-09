@@ -7,6 +7,42 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MantisContextTest {
+    public static final class ExecutionProbe {
+        private final MantisEngine engine;
+        ExecutionProbe(MantisEngine engine) { this.engine = engine; }
+        @MantisExport public boolean inside() { return engine.isExecutingOnCurrentThread(); }
+    }
+
+    @Test void executionTrackingCoversGuestHostCallsAndClearsAfterFailures() {
+        try (MantisEngine engine = new MantisEngine()) {
+            var context = engine.createContext(Map.of("probe.js", "import {probe} from 'test:probe'; export const check = () => probe.inside();"),
+                    Map.of("test:probe", Map.of("probe", new ExecutionProbe(engine))));
+            var check = context.evaluateModule("probe.js").getMember("check");
+            assertFalse(engine.isExecutingOnCurrentThread());
+            assertTrue(context.invoke(check).asBoolean());
+            assertFalse(engine.isExecutingOnCurrentThread());
+            assertThrows(ScriptException.class, () -> context.evaluate("failure.js", "throw Error('failure')"));
+            assertFalse(engine.isExecutingOnCurrentThread());
+        }
+    }
+    @Test void importsSnapshotPathsContainingQuotesSpacesAndUnicode() {
+        try (MantisEngine engine = new MantisEngine()) {
+            var context = engine.createContext(Map.of(
+                    "it's a script.js", "import {value} from \"./lib/it's é.mjs\"; export const answer = value;",
+                    "lib/it's é.mjs", "export const value = 42;"), Map.of());
+            assertEquals(42, context.evaluateModule("it's a script.js").getMember("answer").asInt());
+            assertEquals(42, context.evaluateModule("lib/it's é.mjs").getMember("value").asInt());
+        }
+    }
+
+    @Test void virtualFilePathsRoundTripThroughFileUris() throws Exception {
+        var files = new ModuleFiles(Map.of("main.js", "export const value = 1;"), Map.of());
+        var path = ModuleFiles.scriptPath("main.js");
+        assertTrue(path.isAbsolute());
+        assertEquals(path, files.parsePath(path.toUri()));
+        files.checkAccess(files.parsePath(path.toUri()), java.util.Set.of(java.nio.file.AccessMode.READ));
+        assertEquals(path, files.toRealPath(files.parsePath(path.toUri())));
+    }
     public static final class Host {
         @MantisExport public int twice(int value) { return value * 2; }
         public String secret() { return "hidden"; }

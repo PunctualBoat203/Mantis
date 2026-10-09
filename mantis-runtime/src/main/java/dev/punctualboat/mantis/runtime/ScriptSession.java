@@ -9,6 +9,10 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public final class ScriptSession implements AutoCloseable {
+    public enum LogLevel { INFO, WARN, ERROR }
+    @FunctionalInterface public interface LogSink {
+        void write(LogLevel level, String message);
+    }
     @FunctionalInterface public interface Modules {
         void register(Registrar registrar);
     }
@@ -58,6 +62,16 @@ public final class ScriptSession implements AutoCloseable {
 
     public ScriptSession(MantisEngine engine, Map<String, String> sources, TickClock clock,
                          Consumer<String> log, Consumer<Throwable> errors, Modules extension, boolean clockModule) {
+        this(engine, sources, clock, legacyLog(log), errors, extension, clockModule);
+    }
+
+    private static LogSink legacyLog(Consumer<String> log) {
+        Objects.requireNonNull(log);
+        return (level, message) -> log.accept(level == LogLevel.INFO ? message : level + ": " + message);
+    }
+
+    public ScriptSession(MantisEngine engine, Map<String, String> sources, TickClock clock,
+                         LogSink log, Consumer<Throwable> errors, Modules extension, boolean clockModule) {
         this.engine = engine;
         this.errors = Objects.requireNonNull(errors);
         this.events = new EventBus(this::report);
@@ -239,12 +253,17 @@ public final class ScriptSession implements AutoCloseable {
         }
     }
 
-    public static final class ConsoleApi {
-        private final Consumer<String> log;
-        private ConsoleApi(Consumer<String> log) { this.log = Objects.requireNonNull(log); }
-        @MantisExport public void log(String message) { log.accept(message); }
-        @MantisExport public void warn(String message) { log.accept("WARN: " + message); }
-        @MantisExport public void error(String message) { log.accept("ERROR: " + message); }
+    public final class ConsoleApi {
+        private final LogSink log;
+        private ConsoleApi(LogSink log) { this.log = Objects.requireNonNull(log); }
+        private void write(LogLevel level, Value[] values) {
+            StringJoiner message = new StringJoiner(" ");
+            for (Value value : values) message.add(context.consoleText(value));
+            log.write(level, message.toString());
+        }
+        @MantisExport public void log(Value... values) { write(LogLevel.INFO, values); }
+        @MantisExport public void warn(Value... values) { write(LogLevel.WARN, values); }
+        @MantisExport public void error(Value... values) { write(LogLevel.ERROR, values); }
     }
 
     @Override public void close() { close("stop"); }

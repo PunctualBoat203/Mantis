@@ -24,6 +24,12 @@ commands.register('mantis:words', { permission: 2, arguments: [{name:'item',type
 });
 commands.register('mantis:bad_return', { permission: 2 }, () => 'bad');
 commands.register('mantis:obsolete', {permission:2}, () => 3);
+commands.register('mantis:blocked_reload', {permission:2}, () => {
+  if (server.runCommand('reload') !== 0 || server.runCommand('execute run reload') !== 0) {
+    throw Error('Resource reload must reject inside a script callback');
+  }
+  return 37;
+});
 
 test.hold();
 test.load().then(data => {

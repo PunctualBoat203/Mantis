@@ -90,12 +90,18 @@ public final class MinecraftBindings {
             if (Math.abs((long)x) >= 30000000 || Math.abs((long)z) >= 30000000 || level.isOutsideBuildHeight(y)) throw new IllegalArgumentException("Position outside world bounds");
             return new BlockPos(x,y,z);
         }
+        private BlockPos loadedPos(int x, int y, int z) {
+            BlockPos position = pos(x, y, z);
+            if (!level.hasChunkAt(position)) throw new IllegalStateException("Chunk is not loaded at " + x + ", " + y + ", " + z);
+            return position;
+        }
         @MantisExport public String dimension() { check(); return level.dimension().location().toString(); }
-        @MantisExport public String block(int x,int y,int z) { check(); return java.util.Objects.requireNonNull(ForgeRegistries.BLOCKS.getKey(level.getBlockState(pos(x,y,z)).getBlock())).toString(); }
+        @MantisExport public boolean isLoaded(int x, int y, int z) { check(); return level.hasChunkAt(pos(x, y, z)); }
+        @MantisExport public String block(int x,int y,int z) { check(); return java.util.Objects.requireNonNull(ForgeRegistries.BLOCKS.getKey(level.getBlockState(loadedPos(x,y,z)).getBlock())).toString(); }
         @MantisExport public boolean setBlock(int x,int y,int z,String id) {
             check(); ResourceLocation key = new ResourceLocation(RecipeValues.id(id));
             if (!ForgeRegistries.BLOCKS.containsKey(key)) throw new IllegalArgumentException("Unknown block: " + id);
-            return level.setBlock(pos(x,y,z), ForgeRegistries.BLOCKS.getValue(key).defaultBlockState(), 3);
+            return level.setBlock(loadedPos(x,y,z), ForgeRegistries.BLOCKS.getValue(key).defaultBlockState(), 3);
         }
         @MantisExport public long dayTime() { check(); return level.getDayTime(); }
     }

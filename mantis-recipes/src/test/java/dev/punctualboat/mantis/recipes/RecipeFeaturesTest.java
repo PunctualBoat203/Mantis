@@ -7,6 +7,18 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RecipeFeaturesTest {
+    @Test void jsonNumbersRejectExtremeExponentsBeforeIntegerExpansion() {
+        try (MantisEngine engine = new MantisEngine()) {
+            var context = engine.createContext(Map.of(), Map.of());
+            for (String number : List.of("1e1000000000", "1e-1000000000", "1e10001")) {
+                assertTimeout(java.time.Duration.ofSeconds(2), () -> assertThrows(IllegalArgumentException.class,
+                        () -> JsonCodec.write(context, JsonParser.parseString(number))));
+            }
+            assertEquals(new java.math.BigInteger("123456789012345678901234567890"),
+                    JsonCodec.write(context, JsonParser.parseString("123456789012345678901234567890")).asBigInteger());
+            assertEquals(0, JsonCodec.write(context, JsonParser.parseString("0e1000000000")).asInt());
+        }
+    }
     @Test void buildersCannotCrossRecipeEvents() {
         try (MantisEngine engine = new MantisEngine()) {
             MantisContext[] ref = new MantisContext[1]; RecipesApi api = new RecipesApi(() -> ref[0]);

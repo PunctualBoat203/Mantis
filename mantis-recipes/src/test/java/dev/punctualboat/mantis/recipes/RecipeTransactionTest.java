@@ -30,6 +30,22 @@ class RecipeTransactionTest {
         assertEquals(1000, original.get("example:fusion").get("energy").getAsInt());
     }
 
+    @Test void recipesWithoutAUsableSerializerTypeAreSkippedInsteadOfFailingEveryRoleFilter() {
+        Map<String, JsonObject> pack = new HashMap<>(recipes());
+        pack.put("bad:no_type", json("{\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        pack.put("bad:null_type", json("{\"type\":null,\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        pack.put("bad:array_type", json("{\"type\":[],\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        pack.put("bad:number_type", json("{\"type\":5,\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        pack.put("bad:object_type", json("{\"type\":{},\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        pack.put("bad:boolean_type", json("{\"type\":true,\"ingredients\":[{\"item\":\"minecraft:iron_ingot\"}]}"));
+        RecipeTransaction transaction = RecipeTransaction.borrowing(pack);
+        RecipeFilter usesIron = new RecipeFilter(null, null, null, new JsonPrimitive("minecraft:iron_ingot"), null, List.of(), List.of(), null);
+        assertEquals(List.of("create:mix"), transaction.matching(usesIron));
+        assertEquals(List.of("create:mix"), transaction.matching(new RecipeFilter(null, "create:mixing", null)));
+        assertEquals(1, transaction.replaceValues(new RecipeFilter(null, null, null), new JsonPrimitive("minecraft:iron_ingot"), new JsonPrimitive("minecraft:copper_ingot"), "input"));
+        assertEquals(Set.of("create:mix"), transaction.changedIds());
+    }
+
     @Test void borrowedTransactionsPublishOnlyDetachedChanges() {
         Map<String, JsonObject> original = recipes();
         JsonObject untouched = original.get("create:mix");

@@ -14,7 +14,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.*;
 
 final class ModuleFiles implements FileSystem {
-    static final Path ROOT = Path.of("/mantis");
+    static final Path ROOT = Path.of("/mantis").toAbsolutePath().normalize();
     private final Map<Path, byte[]> files = new HashMap<>();
 
     ModuleFiles(Map<String, String> scripts, Map<String, Map<String, Object>> modules) {

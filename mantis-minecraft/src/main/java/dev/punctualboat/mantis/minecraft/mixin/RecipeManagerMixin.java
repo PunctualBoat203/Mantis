@@ -29,5 +29,6 @@ public abstract class RecipeManagerMixin implements RecipeScripts {
     @Inject(method = "apply(Ljava/util/Map;Lnet/minecraft/server/packs/resources/ResourceManager;Lnet/minecraft/util/profiling/ProfilerFiller;)V", at = @At("HEAD"))
     private void mantis$recipes(Map<ResourceLocation, JsonElement> jsons, ResourceManager resources, ProfilerFiller profiler, CallbackInfo callback) {
         mantis$prepared = RecipeReload.prepare(jsons, mantis$conditions, mantis$dispatcher);
+        Mantis.pending(resources, mantis$prepared);
     }
 }

@@ -32,6 +32,8 @@ jobs:
           PY
       - name: Verify benchmark cases execute
         run: ./gradlew :mantis-benchmarks:benchmarkSmoke --stacktrace
+      - name: Boot the bundled release JAR in an installed Forge server
+        run: python3 scripts/production_smoke.py
       - name: Verify first-load failure and recovery
         run: |
           ./gradlew :mantis-minecraft:runGameTestServer -PtestFirstLoad --stacktrace | tee gametest-firstload.log
@@ -63,8 +65,28 @@ jobs:
         if: failure()
         with:
           name: minecraft-test-logs
-          path: mantis-minecraft/run-gametest/logs/
+          path: |
+            mantis-minecraft/run-gametest/logs/
+            build/production-smoke/*.log
+            build/production-smoke/logs/
       - uses: actions/upload-artifact@v4
         with:
           name: mantis-forge-1.20.1
           path: mantis-minecraft/build/libs/mantis-*.jar
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify unit tests and virtual script paths on Windows
+        run: .\gradlew.bat test --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-test-results
+          path: '**/build/reports/tests/'

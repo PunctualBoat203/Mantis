@@ -162,6 +162,13 @@ public final class MantisGameTests {
         void tick() {
             if (stage == -2) {
                 helper.assertTrue(Mantis.hasActive(), "First-load fallback must activate an empty generation");
+                helper.assertTrue(Mantis.degraded(), "First-load fallback must retain a degraded state visible to operators");
+                var fallback = ((RecipeScripts) server.getRecipeManager()).mantis$prepared();
+                helper.assertTrue(fallback.loadErrors().stream().anyMatch(error -> error.contains("Intentional first-load test failure")),
+                        "First-load fallback must retain the original script error");
+                helper.assertTrue(commandMessages("mantis status").stream().anyMatch(text -> text.contains("degraded"))
+                        && commandMessages("mantis errors").stream().anyMatch(text -> text.contains("Intentional first-load test failure")),
+                        "Operator commands must show the degraded state and original first-load error");
                 helper.assertTrue(server.getRecipeManager().byKey(new ResourceLocation("mantis:smoke")).isEmpty(), "Failed first load must not publish scripted recipes");
                 var infusion = (InfusionTestRecipe.Infusion) server.getRecipeManager().byKey(new ResourceLocation("mantis:infusion")).orElseThrow();
                 helper.assertTrue(infusion.energy() == 1000 && infusion.json().getAsJsonObject("ritual").get("duration").getAsInt() == 200,
@@ -177,6 +184,7 @@ public final class MantisGameTests {
             if (stage == -1) {
                 helper.assertTrue(reload.isDone(), "Waiting for first-load recovery");
                 helper.assertTrue(!reload.isCompletedExceptionally(), "Fixed first-load scripts must recover through reload");
+                helper.assertTrue(!Mantis.degraded(), "Successful recovery must clear the degraded first-load state");
                 stage = 0;
             }
             if (stage == 0) {
@@ -189,6 +197,12 @@ public final class MantisGameTests {
                 helper.assertTrue(ClockData.get(server).clock().remaining("mantis:lifecycle") > 0, "Lifecycle start hook must run after clock attachment");
                 helper.assertTrue(MantisTestExtension.activeFutures() == 1, "Expected one owned pending future");
                 verifyExtensionFailureFallback();
+                Mantis.dispatch("mantis.test.fail_startup", Map.of());
+                helper.assertTrue(Mantis.startupState() == dev.punctualboat.mantis.runtime.SessionState.FAILED,
+                        "A startup gameplay limit must mark only the startup session failed");
+                helper.assertTrue(commandMessages("mantis status").stream().anyMatch(text -> text.contains("startup failed"))
+                        && commandMessages("mantis errors").stream().anyMatch(text -> text.contains("Startup:")),
+                        "Operator commands must expose the failed startup session");
                 write(original + "\nevents.on('recipes', () => recipes.custom('mantis:bad', { type: 'mantis:missing_serializer' }));\n");
                 reload = server.reloadResources(server.getPackRepository().getSelectedIds());
                 stage = 1;
@@ -230,6 +244,9 @@ public final class MantisGameTests {
             if (stage == 3) {
                 helper.assertTrue(reload.isDone(), "Waiting for successful reload");
                 helper.assertTrue(!reload.isCompletedExceptionally(), "Corrected scripts must reload successfully");
+                helper.assertTrue(Mantis.startupState() == dev.punctualboat.mantis.runtime.SessionState.FAILED,
+                        "Failed startup scripts must not prevent later server generations from activating");
+                Mantis.adopt(server, true);
                 verifyRecipe();
                 var clock = ClockData.get(server).clock();
                 verifyGameplay();
@@ -243,6 +260,19 @@ public final class MantisGameTests {
                 CompoundTag saved = ClockData.get(server).save(new CompoundTag());
                 helper.assertTrue(saved.getLong("ticks") == clock.ticks(), "World data must save the internal counter");
                 helper.assertTrue(saved.getCompound("cooldowns").getLong("mantis:smoke") > clock.ticks(), "World data must save cooldown deadlines");
+                var first = server.reloadResources(server.getPackRepository().getSelectedIds());
+                var second = server.reloadResources(server.getPackRepository().getSelectedIds());
+                reload = CompletableFuture.allOf(first, second);
+                stage = 6;
+                helper.assertTrue(false, "Waiting for back-to-back reloads");
+            }
+            if (stage == 6) {
+                helper.assertTrue(reload.isDone(), "Waiting for back-to-back reloads");
+                helper.assertTrue(!reload.isCompletedExceptionally() && Mantis.startupState() == dev.punctualboat.mantis.runtime.SessionState.FAILED,
+                        "Multiple later generations must activate while startup scripts remain failed");
+                verifyRecipe();
+                helper.assertTrue(command("mantis:sum 2") == 2 && ClockData.get(server).clock().scheduledTasks() == 1
+                        && MantisTestExtension.activeFutures() == 1, "Back-to-back reloads must leave exactly one usable generation");
                 stage = 4;
             }
         }
@@ -257,8 +287,22 @@ public final class MantisGameTests {
             try { return server.getCommands().getDispatcher().execute(text, server.createCommandSourceStack()); }
             catch (CommandSyntaxException error) { throw new IllegalStateException(error); }
         }
+        private List<String> commandMessages(String text) {
+            List<String> messages = new ArrayList<>();
+            var source = server.createCommandSourceStack().withSource(new net.minecraft.commands.CommandSource() {
+                @Override public void sendSystemMessage(net.minecraft.network.chat.Component message) { messages.add(message.getString()); }
+                @Override public boolean acceptsSuccess() { return true; }
+                @Override public boolean acceptsFailure() { return true; }
+                @Override public boolean shouldInformAdmins() { return false; }
+            });
+            try { server.getCommands().getDispatcher().execute(text, source); }
+            catch (CommandSyntaxException error) { throw new IllegalStateException(error); }
+            return messages;
+        }
         private void verifyCommands() {
             var dispatcher = server.getCommands().getDispatcher(); var source = server.createCommandSourceStack();
+            helper.assertTrue(command("mantis:blocked_reload") == 37 && server.getCommands().getDispatcher() == dispatcher,
+                    "Direct and execute-wrapped script reloads must reject before changing server resources");
             helper.assertTrue(command("mantis:sum 2 3.5") == 6 && command("mantis:sum 2") == 2, "Required and optional numeric command arguments must reach JS");
             helper.assertTrue(command("mantis:flag true") == 7 && command("mantis:flag false") == 8 && command("mantis:words stone hello world") == 9, "Boolean, word and greedy command arguments must parse");
             int marks = MantisTestExtension.marks("command");
@@ -288,6 +332,8 @@ public final class MantisGameTests {
             try {
                 try (PreparedScripts fallback = RecipeReload.prepare(jsons, ICondition.IContext.EMPTY, true)) {
                     helper.assertTrue(fallback.session().scriptCount() == 0, "Broken extension must produce an empty first-load fallback");
+                    helper.assertTrue(fallback.degraded() && fallback.loadErrors().stream().anyMatch(error -> error.contains("Test extension failed")),
+                            "Extension fallback must preserve the load error for status and errors commands");
                     helper.assertTrue(MantisTestExtension.registrationAttempts == before + 1, "Fallback must not retry the broken extension");
                     helper.assertTrue(jsons.size() == 1 && jsons.get(id) == originalJson, "Fallback must leave recipe JSON unchanged");
                 }
@@ -382,6 +428,25 @@ public final class MantisGameTests {
             var liquidBlock = (net.minecraft.world.level.block.LiquidBlock) ForgeRegistries.BLOCKS.getValue(new ResourceLocation("mantis:script_sap"));
             helper.assertTrue(liquidBlock.getExplosionResistance() == 12 && liquidBlock.defaultBlockState().getLightEmission() == 4, "Liquid block must retain the declared resistance and light");
             helper.assertTrue(liquidBlock.pickupBlock(helper.getLevel(), fluidPos, helper.getLevel().getBlockState(fluidPos)).is(bucket), "Placed fluid must be collectable in its own bucket");
+            helper.getLevel().setBlockAndUpdate(fluidPos, fluid.defaultFluidState().createLegacyBlock());
+            var sourcePlayer = FakePlayerFactory.getMinecraft(helper.getLevel());
+            var placement = new net.minecraft.world.item.context.BlockPlaceContext(sourcePlayer, net.minecraft.world.InteractionHand.MAIN_HAND,
+                    new ItemStack(Items.STONE), new net.minecraft.world.phys.BlockHitResult(Vec3.atCenterOf(fluidPos), net.minecraft.core.Direction.UP, fluidPos, false));
+            helper.assertTrue(helper.getLevel().getBlockState(fluidPos).canBeReplaced(placement)
+                    && liquidBlock.defaultBlockState().getPistonPushReaction() == net.minecraft.world.level.material.PushReaction.DESTROY,
+                    "Mantis fluid must allow block placement and use liquid piston behavior");
+            ((net.minecraft.world.item.BlockItem) Items.STONE).place(placement);
+            helper.assertTrue(helper.getLevel().getBlockState(fluidPos).is(Blocks.STONE), "Placing a solid block must replace the Mantis fluid");
+            var levelRef = new MinecraftBindings.LevelRef(helper.getLevel());
+            helper.assertTrue(levelRef.isLoaded(fluidPos.getX(), fluidPos.getY(), fluidPos.getZ())
+                    && levelRef.block(fluidPos.getX(), fluidPos.getY(), fluidPos.getZ()).equals("minecraft:stone"), "Level helpers must operate on loaded positions");
+            BlockPos remote = new BlockPos(16000000, fluidPos.getY(), 16000000);
+            helper.assertTrue(!levelRef.isLoaded(remote.getX(), remote.getY(), remote.getZ()), "Remote probe chunk must begin unloaded");
+            int rejected = 0;
+            try { levelRef.block(remote.getX(), remote.getY(), remote.getZ()); } catch (IllegalStateException expected) { rejected++; }
+            try { levelRef.setBlock(remote.getX(), remote.getY(), remote.getZ(), "minecraft:stone"); } catch (IllegalStateException expected) { rejected++; }
+            helper.assertTrue(rejected == 2 && !levelRef.isLoaded(remote.getX(), remote.getY(), remote.getZ()),
+                    "Reading or writing an unloaded block must reject without loading its chunk");
             var tab = BuiltInRegistries.CREATIVE_MODE_TAB.get(new ResourceLocation("mantis:script_tab"));
             tab.buildContents(new CreativeModeTab.ItemDisplayParameters(FeatureFlags.DEFAULT_FLAGS, true, server.registryAccess()));
             helper.assertTrue(tab.getIconItem().is(bucket) && tab.getDisplayItems().stream().anyMatch(stack -> stack.is(item))

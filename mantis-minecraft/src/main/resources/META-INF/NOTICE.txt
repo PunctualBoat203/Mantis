@@ -1,0 +1,22 @@
+Mantis
+Copyright (c) 2026 PunctualBoat. All rights reserved.
+
+The bundled JavaScript runtime contains these unmodified third-party libraries:
+
+org.graalvm.sdk:graal-sdk:23.0.12 - Universal Permissive License 1.0
+org.graalvm.js:js:23.0.12 - Universal Permissive License 1.0 and MIT components
+org.graalvm.regex:regex:23.0.12 - Universal Permissive License 1.0
+org.graalvm.truffle:truffle-api:23.0.12 - Universal Permissive License 1.0
+com.ibm.icu:icu4j:72.1 - ICU and accompanying third-party license notices
+
+Oracle's copyright and UPL text are in META-INF/licenses/GraalJS-UPL.txt.
+GraalJS component notices are in META-INF/licenses/GraalJS-third-party.txt.
+ICU4J's distributed license text is in META-INF/licenses/ICU4J.txt.
+
+Upstream sources:
+https://github.com/oracle/graal
+https://github.com/oracle/graaljs
+https://github.com/unicode-org/icu
+
+These licenses apply to the corresponding third-party libraries, independently
+of Mantis's own copyright and license.

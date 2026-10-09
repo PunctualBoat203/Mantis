@@ -29,13 +29,13 @@ import net.minecraft.server.packs.repository.PackSource;
 
 import java.io.IOException;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.server.packs.resources.ResourceManager;
 
 @Mod("mantis")
 public final class Mantis {
     private static final Logger LOG = LogUtils.getLogger();
-    private static final Set<PreparedScripts> PENDING = ConcurrentHashMap.newKeySet();
+    private static final Map<ResourceManager, PreparedScripts> PENDING = new ConcurrentHashMap<>();
     private static Mantis instance;
     private final MantisConfig config;
     private MantisEngine engine;
@@ -89,7 +89,7 @@ public final class Mantis {
         if (engine == null) { engine = new MantisEngine(config.limits()); log("JavaScript runtime: " + engine.runtimeName()); }
         try {
             startup = new ScriptSession(engine, ScriptSources.load(ScriptDirectories.STARTUP), null,
-                    Mantis::log, Mantis::report, registrar -> {
+                    Mantis::scriptLog, Mantis::report, registrar -> {
                 registrar.module("minecraft:mods", Map.of("mods", new MinecraftBindings.Mods()));
                 registrar.module("minecraft:server", Map.of("server", new MinecraftBindings.Server()));
                 registrar.module("minecraft:registries", Map.of("registries", registries));
@@ -111,19 +111,38 @@ public final class Mantis {
         if (instance == null || instance.engine == null) throw new IllegalStateException("Mantis has not initialized its script engine");
         return instance.engine;
     }
+    public static boolean isScriptExecuting() { return instance != null && instance.engine != null && instance.engine.isExecutingOnCurrentThread(); }
     static StartupRegistries startupRegistries() { return instance.registries; }
     public static MantisConfig config() { return instance == null || instance.config == null ? MantisConfig.DEFAULT : instance.config; }
     /** True once a script generation has been activated, meaning a failed reload has something to fall back to. */
     public static boolean hasActive() { return instance != null && instance.active != null; }
+    public static boolean degraded() { return hasActive() && instance.active.degraded(); }
+    public static SessionState startupState() { return instance == null || instance.startup == null ? SessionState.CREATED : instance.startup.state(); }
     public static void log(String text) { LOG.info("[Mantis] {}", text); }
-    public static void report(Throwable error) { LOG.error("[Mantis] {}", error instanceof ScriptException script ? script.format() : error.getMessage()); LOG.debug("Mantis script failure", error); }
-    public static void pending(PreparedScripts scripts) { PENDING.add(scripts); }
-    public static void discardPending() {
-        for (PreparedScripts scripts : Set.copyOf(PENDING)) {
-            if (PENDING.remove(scripts)) {
-                try { scripts.close(); } catch (RuntimeException error) { report(error); }
-            }
+    static void scriptLog(ScriptSession.LogLevel level, String text) {
+        switch (level) {
+            case INFO -> LOG.info("[Mantis] {}", text);
+            case WARN -> LOG.warn("[Mantis] {}", text);
+            case ERROR -> LOG.error("[Mantis] {}", text);
         }
+    }
+    static String formatError(Throwable error) { return error instanceof ScriptException script ? script.format() : error.toString(); }
+    public static void report(Throwable error) { LOG.error("[Mantis] {}", formatError(error)); LOG.debug("Mantis script failure", error); }
+    public static void pending(ResourceManager resources, PreparedScripts scripts) {
+        if (PENDING.putIfAbsent(resources, scripts) != null) {
+            var error = new IllegalStateException("Scripts already prepared for these resources");
+            try { scripts.close(); } catch (RuntimeException cleanup) { error.addSuppressed(cleanup); }
+            throw error;
+        }
+    }
+    public static void discardPending(ResourceManager resources) {
+        PreparedScripts scripts = PENDING.remove(resources);
+        if (scripts != null) {
+            try { scripts.close(); } catch (RuntimeException error) { report(error); }
+        }
+    }
+    public static void discardPending() {
+        for (ResourceManager resources : java.util.List.copyOf(PENDING.keySet())) discardPending(resources);
     }
 
     private void reloadListeners(AddReloadListenerEvent event) {
@@ -146,14 +165,16 @@ public final class Mantis {
         next.session().attachClock(instance.clock);
         PreparedScripts previous = instance.active;
         instance.active = next;
-        PENDING.remove(next);
+        PENDING.values().remove(next);
         if (previous != null) {
             try { previous.session().close("reload"); } catch (RuntimeException error) { report(error); }
         }
         ScriptScheduler scheduler = ScriptScheduler.of(server::execute, server::isSameThread);
         next.session().start(scheduler, reload);
         server.getPlayerList().getPlayers().forEach(server.getCommands()::sendCommands);
-        if (instance.startup != null) instance.startup.start(scheduler, false);
+        if (instance.startup != null && (instance.startup.state() == SessionState.LOADED || instance.startup.state() == SessionState.RUNNING)) {
+            instance.startup.start(scheduler, false);
+        }
         instance.emit(reload ? "server.reloaded" : "server.started", Map.of("ticks", instance.clock.ticks()));
         log("Loaded " + next.session().scriptCount() + " server scripts");
     }
@@ -191,7 +212,12 @@ public final class Mantis {
     }
 
     private void loggedIn(PlayerEvent.PlayerLoggedInEvent event) {
-        if (event.getEntity() instanceof ServerPlayer player) emit("player.logged_in", Map.of("player", new MinecraftBindings.Player(player)));
+        if (event.getEntity() instanceof ServerPlayer player) {
+            if (degraded() && player.hasPermissions(2)) {
+                player.sendSystemMessage(Component.literal("Mantis is degraded: server scripts failed on first load and scripted recipe changes were skipped. Run /mantis errors, fix the scripts, then /mantis reload."));
+            }
+            emit("player.logged_in", Map.of("player", new MinecraftBindings.Player(player)));
+        }
     }
     private void loggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) emit("player.logged_out", Map.of("player", new MinecraftBindings.Player(player)));
@@ -205,9 +231,9 @@ public final class Mantis {
                 }))
                 .then(Commands.literal("status").executes(command -> {
                     ScriptSession scripts = active.session();
-                    String text = "Mantis " + scripts.state().name().toLowerCase() + ": " + scripts.scriptCount() + " scripts, " + scripts.events().listenerCount()
+                    String text = "Mantis " + (active.degraded() ? "degraded" : scripts.state().name().toLowerCase()) + ": " + scripts.scriptCount() + " scripts, " + scripts.events().listenerCount()
                             + " listeners, " + clock.scheduledTasks() + " timers, " + scripts.async().pendingCount() + " async, " + scripts.context().invocations() + " calls, "
-                            + scripts.context().executionNanos() / 1_000_000 + " ms script time";
+                            + scripts.context().executionNanos() / 1_000_000 + " ms script time, startup " + startupState().name().toLowerCase();
                     command.getSource().sendSuccess(() -> Component.literal(text), false);
                     return 1;
                 }))
@@ -218,9 +244,11 @@ public final class Mantis {
                     command.getSource().sendSuccess(() -> Component.literal(String.join(", ", active.session().moduleNames())), false); return 1;
                 }))
                 .then(Commands.literal("errors").executes(command -> {
-                    var errors = active.session().recentErrors();
-                    if (errors.isEmpty()) command.getSource().sendSuccess(() -> Component.literal("No script errors in this generation"), false);
-                    else errors.stream().skip(Math.max(0, errors.size() - 5)).forEach(error -> command.getSource().sendFailure(Component.literal(error)));
+                    var errors = java.util.stream.Stream.concat(active.loadErrors().stream(), active.session().recentErrors().stream());
+                    var combined = java.util.stream.Stream.concat(errors, startup == null ? java.util.stream.Stream.<String>empty()
+                            : startup.recentErrors().stream().map(error -> "Startup: " + error)).toList();
+                    if (combined.isEmpty()) command.getSource().sendSuccess(() -> Component.literal("No script errors in this generation"), false);
+                    else combined.stream().skip(Math.max(0, combined.size() - 5)).forEach(error -> command.getSource().sendFailure(Component.literal(error)));
                     return 1;
                 }))
                 .then(Commands.literal("profile").executes(command -> {

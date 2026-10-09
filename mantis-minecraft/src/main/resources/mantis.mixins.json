@@ -4,6 +4,6 @@
   "package": "dev.punctualboat.mantis.minecraft.mixin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "mantis.refmap.json",
-  "mixins": ["RecipeManagerMixin", "MinecraftServerMixin"],
+  "mixins": ["RecipeManagerMixin", "MinecraftServerMixin", "ReloadableServerResourcesMixin"],
   "injectors": {"defaultRequire": 1}
 }
