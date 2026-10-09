@@ -60,7 +60,10 @@ def main():
     work.mkdir(parents=True, exist_ok=False)
     version = PROPERTIES["minecraft_version"] + "-" + PROPERTIES["forge_version"]
     installer = work / "forge-installer.jar"
-    urllib.request.urlretrieve("https://maven.minecraftforge.net/net/minecraftforge/forge/" + version + "/forge-" + version + "-installer.jar", installer)
+    url = "https://maven.minecraftforge.net/net/minecraftforge/forge/" + version + "/forge-" + version + "-installer.jar"
+    request = urllib.request.Request(url, headers={"User-Agent": "Java/17"})
+    with urllib.request.urlopen(request, timeout=60) as response, installer.open("wb") as target:
+        shutil.copyfileobj(response, target)
     print("Installing Forge " + version, flush=True)
     with (work / "installer.log").open("w") as log:
         subprocess.run(["java", "-jar", str(installer), "--installServer", str(work)], cwd=work, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)

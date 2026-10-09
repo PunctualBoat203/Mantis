@@ -32,8 +32,6 @@ jobs:
           PY
       - name: Verify benchmark cases execute
         run: ./gradlew :mantis-benchmarks:benchmarkSmoke --stacktrace
-      - name: Boot the bundled release JAR in an installed Forge server
-        run: python3 scripts/production_smoke.py
       - name: Verify first-load failure and recovery
         run: |
           ./gradlew :mantis-minecraft:runGameTestServer -PtestFirstLoad --stacktrace | tee gametest-firstload.log
@@ -56,6 +54,8 @@ jobs:
           if not re.search(r'All [1-9][0-9]* required tests passed', log):
               raise SystemExit('Minecraft did not report passing tests with Create installed')
           PY
+      - name: Boot the bundled release JAR in an installed Forge server
+        run: python3 scripts/production_smoke.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
