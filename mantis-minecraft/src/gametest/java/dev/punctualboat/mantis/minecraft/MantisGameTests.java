@@ -273,6 +273,31 @@ public final class MantisGameTests {
                 verifyRecipe();
                 helper.assertTrue(command("mantis:sum 2") == 2 && ClockData.get(server).clock().scheduledTasks() == 1
                         && MantisTestExtension.activeFutures() == 1, "Back-to-back reloads must leave exactly one usable generation");
+                oldDispatcher = server.getCommands().getDispatcher();
+                MantisTestExtension.failLateReload = true;
+                reload = server.reloadResources(server.getPackRepository().getSelectedIds());
+                stage = 7;
+                helper.assertTrue(false, "Waiting for late reload rejection");
+            }
+            if (stage == 7) {
+                helper.assertTrue(reload.isDone(), "Waiting for late reload rejection");
+                MantisTestExtension.failLateReload = false;
+                helper.assertTrue(reload.isCompletedExceptionally() && server.getCommands().getDispatcher() == oldDispatcher
+                        && command("mantis:sum 2") == 2 && ClockData.get(server).clock().scheduledTasks() == 1
+                        && MantisTestExtension.activeFutures() == 1, "A later listener failure must close only its prepared candidate and preserve the active generation");
+                MantisTestExtension.nestNextReload = true;
+                reload = server.reloadResources(server.getPackRepository().getSelectedIds());
+                stage = 8;
+                helper.assertTrue(false, "Waiting for nested overlapping reloads");
+            }
+            if (stage == 8) {
+                helper.assertTrue(reload.isDone() && MantisTestExtension.nestedReload != null && MantisTestExtension.nestedReload.isDone(),
+                        "Waiting for nested overlapping reloads");
+                helper.assertTrue(!reload.isCompletedExceptionally() && !MantisTestExtension.nestedReload.isCompletedExceptionally(),
+                        "Overlapping resource loads must not close each other's prepared sessions");
+                verifyRecipe();
+                helper.assertTrue(command("mantis:sum 2") == 2 && ClockData.get(server).clock().scheduledTasks() == 1
+                        && MantisTestExtension.activeFutures() == 1, "Overlapping reloads must leave one working generation and release replaced work");
                 stage = 4;
             }
         }

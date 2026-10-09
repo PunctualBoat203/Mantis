@@ -16,13 +16,29 @@ import java.util.concurrent.*;
 public final class MantisTestExtension {
     private static final List<CompletableFuture<?>> HELD = new CopyOnWriteArrayList<>();
     static boolean failRegistration;
+    static boolean failLateReload, nestNextReload;
+    static CompletableFuture<Void> nestedReload;
     static int registrationAttempts;
     private static final Map<String, Integer> MARKS = new ConcurrentHashMap<>();
     @SubscribeEvent public static void setup(FMLCommonSetupEvent event) {
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(MantisTestExtension::reloadListeners);
         MantisApi.registerExtension("mantis_test", registrar -> {
             registrationAttempts++;
             if (failRegistration) throw new IllegalStateException("Test extension failed");
             registrar.module("mantis_test:async", Map.of("test", new Host()));
+        });
+    }
+    private static void reloadListeners(net.minecraftforge.event.AddReloadListenerEvent event) {
+        event.addListener(new net.minecraft.server.packs.resources.SimplePreparableReloadListener<Void>() {
+            @Override protected Void prepare(net.minecraft.server.packs.resources.ResourceManager resources, net.minecraft.util.profiling.ProfilerFiller profiler) { return null; }
+            @Override protected void apply(Void prepared, net.minecraft.server.packs.resources.ResourceManager resources, net.minecraft.util.profiling.ProfilerFiller profiler) {
+                if (failLateReload) throw new IllegalStateException("Intentional failure after Mantis recipe preparation");
+                if (nestNextReload) {
+                    nestNextReload = false;
+                    var server = ServerLifecycleHooks.getCurrentServer();
+                    nestedReload = server.reloadResources(server.getPackRepository().getSelectedIds());
+                }
+            }
         });
     }
     public record Data(ResourceLocation id, Component component, List<Integer> values) {}
